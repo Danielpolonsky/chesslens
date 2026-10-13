@@ -15,11 +15,13 @@ def style(fig: go.Figure, height: int = 340, title: str | None = None, legend: b
     fig.update_layout(
         template="plotly_white",
         height=height,
-        margin=dict(l=10, r=10, t=48 if title else 18, b=10),
+        margin=dict(l=10, r=10, t=(78 if legend else 48) if title else 30, b=10),
         font=dict(family=FONT, size=12.5, color="#334155"),
-        title=dict(text=title, font=dict(size=15, color="#0F172A"), x=0.01) if title else None,
+        title=dict(text=title, font=dict(size=15, color="#0F172A"), x=0.01, y=0.985, yanchor="top")
+        if title else None,
         showlegend=legend,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=None),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="left", x=0, title=None,
+                    traceorder="normal"),
         hoverlabel=dict(font_family=FONT),
         plot_bgcolor="#FFFFFF",
         paper_bgcolor="rgba(0,0,0,0)",
@@ -56,23 +58,28 @@ def color_results(df: pd.DataFrame) -> go.Figure:
     return style(fig, height=300, title="White vs Black")
 
 
+TIME_CLASS_COLORS = {"bullet": "#E76F51", "blitz": "#2A9D8F", "rapid": "#1F3B5B",
+                     "classical": "#8A6514", "daily": "#7C3AED", "unknown": "#94A3B8"}
+
+
 def rating_trend(games: pd.DataFrame) -> go.Figure:
+    """One line per time control - platforms keep separate ratings for each."""
     df = games.dropna(subset=["player_elo", "played_at"]).sort_values("played_at")
     fig = go.Figure()
-    fig.add_scatter(x=df["played_at"], y=df["player_elo"], mode="lines", line=dict(color=NAVY, width=2),
-                    name="Rating", hoverinfo="skip")
-    for outcome, color in OUTCOME_COLORS.items():
-        sub = df[df["outcome"] == outcome]
-        if sub.empty:
+    for tc, sub in df.groupby("time_class", sort=False):
+        if len(sub) < 2:
             continue
         fig.add_scatter(
-            x=sub["played_at"], y=sub["player_elo"], mode="markers", name=outcome,
-            marker=dict(color=color, size=7, line=dict(color="white", width=1)),
-            customdata=np.stack([sub["opponent"], sub["opponent_elo"].fillna(0)], axis=1),
+            x=sub["played_at"], y=sub["player_elo"], mode="lines+markers",
+            name=f"{tc.title()} ({len(sub)} g)",
+            line=dict(color=TIME_CLASS_COLORS.get(tc, SLATE), width=2),
+            marker=dict(color=[OUTCOME_COLORS.get(o, SLATE) for o in sub["outcome"]], size=7,
+                        line=dict(color="white", width=1)),
+            customdata=np.stack([sub["opponent"], sub["opponent_elo"].fillna(0), sub["outcome"]], axis=1),
             hovertemplate="%{x|%b %d, %Y}<br>Rating %{y}<br>vs %{customdata[0]} (%{customdata[1]})"
-                          "<extra>" + outcome + "</extra>",
+                          " - %{customdata[2]}<extra>" + tc.title() + "</extra>",
         )
-    return style(fig, height=320, title="Rating over time")
+    return style(fig, height=330, title="Rating over time by time control (marker colour = result)")
 
 
 def trend_lines(df: pd.DataFrame, granularity: str) -> go.Figure:
@@ -183,31 +190,36 @@ def opening_bars(df: pd.DataFrame, top: int = 12) -> go.Figure:
             customdata=np.stack([d["avg_score"], d["wins"], d["draws"], d["losses"]], axis=1),
             hovertemplate="%{y}<br>%{x} games, score %{customdata[0]:.0%}<br>"
                           "%{customdata[1]}W / %{customdata[2]}D / %{customdata[3]}L<extra></extra>",
-            text=[f"{s:.0%}" for s in d["avg_score"]], textposition="outside",
+            text=[f"{s:.0%}" for s in d["avg_score"]], textposition="outside", cliponaxis=False,
         )
     )
-    fig.update_xaxes(title="Games played")
+    fig.update_xaxes(title="Games played", range=[0, d["games"].max() * 1.15])
     return style(fig, height=max(320, 30 * len(d) + 80), title="Most-played openings (colour = score)",
                  legend=False)
 
 
 def opening_scatter(df: pd.DataFrame, min_games: int) -> go.Figure:
     d = df[(df["games"] >= min_games) & df["acpl"].notna()]
+    labelled = set(d.nlargest(6, "games")["opening"])
     fig = go.Figure(
         go.Scatter(
-            x=d["acpl"], y=d["avg_score"], mode="markers+text", text=d["opening"],
+            x=d["acpl"], y=d["avg_score"], mode="markers+text",
+            text=[o if o in labelled else "" for o in d["opening"]], hovertext=d["opening"],
             textposition="top center", textfont=dict(size=10.5),
             marker=dict(size=np.sqrt(d["games"]) * 7, color=d["serious_rate"],
                         colorscale=[[0, TEAL], [1, RED]], showscale=True,
                         colorbar=dict(title="Err. rate", tickformat=".0%", thickness=12),
                         line=dict(color="white", width=1)),
             customdata=np.stack([d["games"], d["serious_rate"]], axis=1),
-            hovertemplate="%{text}<br>%{customdata[0]} games<br>Score %{y:.0%}<br>ACPL %{x:.0f}"
+            hovertemplate="%{hovertext}<br>%{customdata[0]} games<br>Score %{y:.0%}<br>ACPL %{x:.0f}"
                           "<br>Mistake+blunder rate %{customdata[1]:.1%}<extra></extra>",
         )
     )
+    if not d.empty:
+        span = max(10.0, float(d["acpl"].max() - d["acpl"].min()))
+        fig.update_xaxes(range=[d["acpl"].min() - 0.25 * span, d["acpl"].max() + 0.25 * span])
     fig.update_xaxes(title="Average centipawn loss (lower is better)")
-    fig.update_yaxes(title="Score", tickformat=".0%")
+    fig.update_yaxes(title="Score", tickformat=".0%", range=[-0.08, 1.08])
     return style(fig, height=420, title=f"Score vs accuracy by opening (>= {min_games} games; size = games)",
                  legend=False)
 
@@ -239,7 +251,7 @@ def model_comparison(models: dict) -> go.Figure:
         t = res["test"]
         fig.add_bar(x=[m[1] for m in metrics], y=[t[m[0]] for m in metrics], name=name,
                     marker_color=palette.get(name, SLATE),
-                    text=[f"{t[m[0]]:.2f}" for m in metrics], textposition="outside")
+                    hovertemplate="%{x}: %{y:.3f}<extra>" + name + "</extra>")
     fig.update_layout(barmode="group")
     fig.update_yaxes(range=[0, 1.05])
     return style(fig, height=360, title="Held-out test performance (unseen games)")

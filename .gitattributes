@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.db binary
+*.joblib binary
+*.gz binary
+*.png binary

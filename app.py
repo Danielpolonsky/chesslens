@@ -50,6 +50,7 @@ def init_state() -> None:
     ss.setdefault("flash", None)
     ss.setdefault("explorer_move_id", None)
     ss.setdefault("import_messages", [])
+    ss.setdefault("pending_player", None)
 
 
 @st.cache_resource(ttl=3600)
@@ -93,6 +94,19 @@ def go_demo() -> None:
     ss.dataset = "demo"
 
 
+def match_name(names: list[str], wanted: str | None) -> str | None:
+    if not wanted:
+        return None
+    return next((n for n in names if n.lower() == wanted.lower()), None)
+
+
+def set_user_player(name: str | None) -> None:
+    """Select a player in the user dataset; applied to the sidebar widget on the next run."""
+    if name:
+        ss.user_player = name
+        ss.pending_player = name
+
+
 # ---------------------------------------------------------------------------
 # Sidebar: dataset, player, filters, analysis progress
 # ---------------------------------------------------------------------------
@@ -115,6 +129,12 @@ def job_progress() -> None:
                 f"{s.get('cache_hits', 0):,} served from cache) in {s.get('seconds', 0)} s.",
             )
         st.rerun()
+    if job.queued:
+        st.markdown("**Queued for analysis**")
+        st.caption("Other analyses are using the engine on this server; yours starts automatically.")
+        if st.button("Cancel analysis", key="cancel_queued"):
+            job.cancel()
+        return
     st.markdown("**Stockfish analysis running**")
     st.progress(job.fraction, text=f"Game {min(job.games_done + 1, job.total)} of {job.total}")
     elapsed = time.time() - job.started_at
@@ -152,11 +172,19 @@ def sidebar(conn) -> tuple[str | None, an.Filters]:
             st.info("No games in this dataset yet.")
             return None, an.Filters()
         names = players["username"].tolist()
-        preferred = DEMO_PLAYER if ss.dataset == "demo" else ss.user_player
-        index = next((i for i, n in enumerate(names) if preferred and n.lower() == preferred.lower()), 0)
+        key = f"player_{ss.dataset}"
+        if ss.dataset == "user" and ss.get("pending_player"):
+            match = match_name(names, ss.pending_player)
+            if match:
+                ss[key] = match
+            ss.pending_player = None
+        if ss.get(key) not in names:
+            preferred = DEMO_PLAYER if ss.dataset == "demo" else ss.user_player
+            ss[key] = match_name(names, preferred) or names[0]
+        game_counts = players.set_index("username")["games"]
         player = st.selectbox(
-            "Player", names, index=index, key=f"player_{ss.dataset}",
-            format_func=lambda n: f"{n} ({int(players.set_index('username').loc[n, 'games'])} games)",
+            "Player", names, key=key,
+            format_func=lambda n: f"{n} ({int(game_counts.loc[n])} games)",
         )
         if ss.dataset == "user":
             ss.user_player = player
@@ -194,6 +222,16 @@ def require_data() -> tuple | None:
         st.page_link(PAGES["home"], label="Go to Home", icon=":material/home:")
         return None
     return conn, player, CTX["filters"]
+
+
+def as_pct(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    out = df.copy()
+    out[cols] = out[cols].astype(float) * 100
+    return out
+
+
+def pct_col(label: str, **kwargs):
+    return st.column_config.NumberColumn(label, format="%.1f%%", **kwargs)
 
 
 def subtitle(player: str) -> str:
@@ -280,8 +318,7 @@ def _after_import(report: ingest.ParseReport, preferred_player: str | None) -> N
         if preferred_player is None:
             cands = ingest.candidate_players(report.games)
             preferred_player = cands[0][0] if cands else None
-        if preferred_player:
-            ss.user_player = preferred_player
+        set_user_player(preferred_player)
         ss.dataset = "user"
     if report.skipped or report.errors:
         detail = "; ".join(report.errors[:3])
@@ -345,10 +382,10 @@ def analysis_panel() -> None:
         if players.empty:
             return
         names = players["username"].tolist()
-        idx = next((i for i, n in enumerate(names)
-                    if ss.user_player and n.lower() == ss.user_player.lower()), 0)
+        ss.analysis_player = match_name(names, ss.user_player) or names[0]
         c1, c2 = st.columns([1.3, 2])
-        player = c1.selectbox("Player to analyze", names, index=idx,
+        player = c1.selectbox("Player to analyze", names, key="analysis_player",
+                              on_change=lambda: set_user_player(ss.analysis_player),
                               help="Players are ordered by number of games in your import.")
         ss.user_player = player
         row = players.set_index("username").loc[player]
@@ -433,17 +470,18 @@ def page_overview() -> None:
         if not colors.empty:
             st.plotly_chart(charts.color_results(colors), width="stretch")
     if not colors.empty:
-        tbl = colors.rename(columns={"color": "Color", "games": "Games"})
+        tbl = as_pct(colors, ["avg_score", "win_rate", "blunder_rate", "serious_rate"])
+        tbl = tbl.rename(columns={"color": "Color", "games": "Games"})
         tbl["Color"] = tbl["Color"].str.title()
         st.dataframe(
             tbl[["Color", "Games", "avg_score", "win_rate", "acpl", "blunder_rate", "serious_rate"]],
             hide_index=True, width="stretch",
             column_config={
-                "avg_score": st.column_config.NumberColumn("Score", format="percent"),
-                "win_rate": st.column_config.NumberColumn("Win rate", format="percent"),
+                "avg_score": pct_col("Score"),
+                "win_rate": pct_col("Win rate"),
                 "acpl": st.column_config.NumberColumn("Avg CP loss", format="%.0f"),
-                "blunder_rate": st.column_config.NumberColumn("Blunder rate", format="percent"),
-                "serious_rate": st.column_config.NumberColumn("Mistake + blunder rate", format="percent"),
+                "blunder_rate": pct_col("Blunder rate"),
+                "serious_rate": pct_col("Mistake + blunder rate"),
             },
         )
     if games["player_elo"].notna().sum() >= 2:
@@ -504,14 +542,14 @@ def page_performance() -> None:
         st.plotly_chart(charts.phase_error_rates(ph), width="stretch")
     with c2:
         st.dataframe(
-            ph[["phase", "moves", "acpl", "inaccuracy_rate", "mistake_rate", "blunder_rate"]],
+            as_pct(ph, ["serious_rate", "blunder_rate"])[["phase", "moves", "acpl", "serious_rate",
+                                                         "blunder_rate"]],
             hide_index=True, width="stretch",
             column_config={
                 "phase": "Phase", "moves": st.column_config.NumberColumn("Moves", format="%d"),
                 "acpl": st.column_config.NumberColumn("Avg CP loss", format="%.0f"),
-                "inaccuracy_rate": st.column_config.NumberColumn("Inaccuracies", format="percent"),
-                "mistake_rate": st.column_config.NumberColumn("Mistakes", format="percent"),
-                "blunder_rate": st.column_config.NumberColumn("Blunders", format="percent"),
+                "serious_rate": pct_col("Mistake + blunder"),
+                "blunder_rate": pct_col("Blunders"),
             },
         )
         small = ph[ph["moves"] < config.MIN_MOVES_FOR_PHASE_CLAIM]
@@ -589,19 +627,20 @@ def page_openings() -> None:
     table["sample"] = table["games"].map(
         lambda n: "Too small to judge" if n < min_games else ("Moderate" if n < 10 else "Reasonable"))
     st.markdown("#### All openings")
+    table = as_pct(table, ["avg_score", "win_rate", "serious_rate", "opening_inaccuracy_rate"])
     st.dataframe(
         table[["opening", "games", "wins", "draws", "losses", "avg_score", "win_rate", "win_ci", "acpl",
                "serious_rate", "opening_inaccuracy_rate", "sample"]],
         hide_index=True, width="stretch",
         column_config={
             "opening": "Opening family", "games": "Games", "wins": "W", "draws": "D", "losses": "L",
-            "avg_score": st.column_config.NumberColumn("Score", format="percent"),
-            "win_rate": st.column_config.NumberColumn("Win rate", format="percent"),
+            "avg_score": pct_col("Score"),
+            "win_rate": pct_col("Win rate"),
             "win_ci": st.column_config.TextColumn("Win rate 95% CI", help="Wilson score interval"),
             "acpl": st.column_config.NumberColumn("Avg CP loss", format="%.0f"),
-            "serious_rate": st.column_config.NumberColumn("Mistake + blunder rate", format="percent"),
-            "opening_inaccuracy_rate": st.column_config.NumberColumn(
-                "Opening-phase error rate", format="percent",
+            "serious_rate": pct_col("Mistake + blunder rate"),
+            "opening_inaccuracy_rate": pct_col(
+                "Opening-phase error rate",
                 help="Share of moves in the opening phase that were inaccuracies or worse"),
             "sample": "Sample size",
         },
@@ -649,7 +688,10 @@ def page_mistakes() -> None:
     if phases:
         where = f"AND pm.phase IN ({','.join('?' * len(phases))})"
         params = phases
-    df = an.mistakes(conn, player, f, categories=cats, extra_where=where, extra_params=params, limit=300)
+    limit = 1000
+    df = an.mistakes(conn, player, f, categories=cats, extra_where=where, extra_params=params, limit=limit)
+    if len(df) == limit:
+        st.caption(f"Showing the {limit} largest errors.")
     if df.empty:
         ui.empty_state("No matching mistakes", "Nothing in these categories - nice!")
         return

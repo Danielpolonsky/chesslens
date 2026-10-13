@@ -12,9 +12,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from . import config
 from . import database as db
 from .engine_analysis import StockfishAnalyzer
 from .ingest import ParseReport
+
+# Server-wide cap on simultaneous engine processes (shared by all browser sessions).
+ENGINE_SLOTS = threading.BoundedSemaphore(config.MAX_CONCURRENT_ANALYSES)
 
 
 def store_report(db_path: str | Path, report: ParseReport) -> db.InsertSummary:
@@ -89,6 +93,7 @@ class AnalysisJob:
     positions_done: int = 0
     positions_total: int = 0
     finished: bool = False
+    queued: bool = True
     error: str | None = None
     stats: dict = field(default_factory=dict)
     started_at: float = field(default_factory=time.time)
@@ -121,9 +126,17 @@ class AnalysisJob:
 
     def _run(self) -> None:
         try:
-            self.stats = analyze_games(
-                self.db_path, self.game_ids, self.depth, self._progress, self._stop.is_set
-            )
+            while not ENGINE_SLOTS.acquire(timeout=0.5):
+                if self._stop.is_set():
+                    return
+            try:
+                self.queued = False
+                self.started_at = time.time()
+                self.stats = analyze_games(
+                    self.db_path, self.game_ids, self.depth, self._progress, self._stop.is_set
+                )
+            finally:
+                ENGINE_SLOTS.release()
         except Exception as exc:  # surfaced in the UI
             self.error = str(exc)
         finally:
