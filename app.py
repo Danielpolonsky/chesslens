@@ -148,7 +148,8 @@ def job_progress() -> None:
 
 def sidebar(conn) -> tuple[str | None, an.Filters]:
     with st.sidebar:
-        st.markdown('<div class="cl-side-brand">Chess<span>Lens</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="cl-side-brand"><span class="cl-logo">♞</span>ChessLens</div>',
+                    unsafe_allow_html=True)
         st.caption("Built for Polonsky Academy")
         if ss.job is not None:
             job_progress()
@@ -156,7 +157,7 @@ def sidebar(conn) -> tuple[str | None, an.Filters]:
 
         options = ["demo"] + (["user"] if has_user_data() else [])
         if ss.dataset is None:
-            st.info("Load the demo or import your games from the Home page.")
+            st.caption("No dataset loaded. Try the demo or import your games from the Home page.")
             return None, an.Filters()
         labels = {"demo": "Demo dataset", "user": "My imported games"}
         choice = st.radio("Dataset", options, index=options.index(ss.dataset),
@@ -169,7 +170,7 @@ def sidebar(conn) -> tuple[str | None, an.Filters]:
 
         players = db.list_players(conn)
         if players.empty:
-            st.info("No games in this dataset yet.")
+            st.caption("No games in this dataset yet.")
             return None, an.Filters()
         names = players["username"].tolist()
         key = f"player_{ss.dataset}"
@@ -254,46 +255,86 @@ def needs_analysis_note(ov: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 
+DEMO_PREVIEW_SQL = """
+SELECT m.fen_before, m.uci, a.best_move_uci, m.color, m.move_number, m.san, a.cpl
+FROM moves m
+JOIN move_analysis a ON a.move_id = m.move_id
+JOIN games g ON g.game_id = m.game_id
+JOIN players p ON p.player_id = CASE m.color WHEN 'white' THEN g.white_id ELSE g.black_id END
+WHERE p.username = ? AND a.classification = 'blunder' AND m.phase = 'middlegame'
+ORDER BY a.cpl DESC
+LIMIT 1
+"""
+
+
+@st.cache_data
+def demo_summary() -> dict | None:
+    if not config.DEMO_DB_PATH.exists():
+        return None
+    conn = db.connect(config.DEMO_DB_PATH, read_only=True)
+    try:
+        players = db.list_players(conn).set_index("username")
+        if DEMO_PLAYER not in players.index:
+            return None
+        preview = conn.execute(DEMO_PREVIEW_SQL, (DEMO_PLAYER,)).fetchone()
+        moves = conn.execute("SELECT COUNT(*) FROM move_analysis").fetchone()[0]
+        depth = conn.execute("SELECT MAX(depth) FROM analysis_runs").fetchone()[0]
+        return {
+            "games": int(players.loc[DEMO_PLAYER, "games"]),
+            "moves": int(moves),
+            "depth": depth,
+            "preview": tuple(preview) if preview else None,
+        }
+    finally:
+        conn.close()
+
+
 def page_home() -> None:
     st.markdown(
-        """
-        <div class="cl-hero">
-          <h1>ChessLens</h1>
-          <p>Engine-powered analytics for chess improvement. ChessLens analyzes your games with
-          Stockfish, stores every move in a SQL database, measures where your mistakes happen and
-          turns the statistics into a personalized training plan.</p>
-        </div>
-        """,
+        '<div class="cl-greeting">Analyze your chess games</div>'
+        '<div class="cl-lead">ChessLens runs every move through Stockfish, stores the results in SQL '
+        "and shows where your mistakes happen and what to practise next.</div>",
         unsafe_allow_html=True,
     )
-    c1, c2 = st.columns([1, 2.4], vertical_alignment="center")
-    with c1:
-        if st.button("Try Demo", type="primary", icon=":material/play_arrow:", width="stretch",
-                     disabled=not config.DEMO_DB_PATH.exists()):
-            go_demo()
-            st.switch_page(PAGES["overview"])
-    with c2:
-        st.markdown(
-            "**No account or upload needed.** The demo opens 158 precomputed, engine-analyzed public "
-            "games of one Lichess player from the CC0 Lichess open database."
-        )
 
-    f1, f2, f3, f4 = st.columns(4)
-    features = [
-        ("Engine analysis", "Every move is evaluated by Stockfish; centipawn loss is measured from "
-                            "the mover's point of view."),
-        ("SQL analytics", "Games, moves and evaluations live in a normalized SQLite database queried "
-                          "with joins and GROUP BYs."),
-        ("Coaching plan", "Rule-based priorities backed by your own error rates, with concrete "
-                          "positions from your games."),
-        ("Risk model", "A scikit-learn model estimates serious-error risk from pre-move board "
-                       "features, evaluated on unseen games."),
-    ]
-    for col, (title, body) in zip((f1, f2, f3, f4), features):
-        col.markdown(f'<div class="cl-feature"><h4>{ui.esc(title)}</h4><p>{ui.esc(body)}</p></div>',
-                     unsafe_allow_html=True)
+    demo = demo_summary()
+    with st.container(border=True):
+        left, right = st.columns([1, 1.55], gap="large", vertical_alignment="center")
+        with left:
+            if demo and demo["preview"]:
+                fen, uci, best, color, *_ = demo["preview"]
+                svg = ui.board_svg(fen, uci, best, color, size=360, coordinates=False)
+                st.markdown(f'<div class="cl-preview">{svg}</div>', unsafe_allow_html=True)
+        with right:
+            if demo is None:
+                st.markdown('<div class="cl-meta-title">Demo dataset</div>'
+                            '<div class="cl-meta">The demo database is not available on this server.</div>',
+                            unsafe_allow_html=True)
+            else:
+                caption = ""
+                if demo["preview"]:
+                    _, _, _, color, move_no, san, cpl = demo["preview"]
+                    caption = (f"Pictured: {move_no}{'.' if color == 'white' else '...'}{san}, "
+                               f"a {cpl} cp blunder (red) and the engine's choice (green).")
+                st.markdown(
+                    f'<div class="cl-meta-title">Demo dataset {ui.badge("Ready")}</div>'
+                    f'<div class="cl-meta"><b>{demo["games"]} games</b> by one Lichess player, '
+                    f'<b>{demo["moves"]:,} moves</b> analyzed by Stockfish at depth {demo["depth"]}</div>'
+                    '<div class="cl-label">Source</div>'
+                    '<div class="cl-value">Lichess open database, January 2013 (CC0)</div>'
+                    '<div class="cl-label">Player</div>'
+                    f'<div class="cl-value">{ui.esc(DEMO_PLAYER)}</div>'
+                    f'<div class="cl-footer" style="margin:.9rem 0 .9rem 0">{ui.esc(caption)}</div>',
+                    unsafe_allow_html=True,
+                )
+                b1, b2, _ = st.columns([1, 1, 1.2])
+                if b1.button("Try Demo", type="primary", icon=":material/play_arrow:", width="stretch"):
+                    go_demo()
+                    st.switch_page(PAGES["overview"])
+                if b2.button("Methodology", icon=":material/info:", width="stretch"):
+                    st.switch_page(PAGES["about"])
 
-    st.markdown("### Analyze your own games")
+    ui.section("Import your games")
     st.caption("Imported games are stored in a temporary database for this browser session only "
                "and are never shared with other users.")
     for kind, msg in ss.import_messages:
@@ -306,6 +347,21 @@ def page_home() -> None:
 
     if has_user_data():
         analysis_panel()
+
+    ui.section("How it works")
+    steps = [
+        ("Import", "Upload a PGN or fetch recent games from Chess.com. Duplicates are skipped."),
+        ("Analyze", "Stockfish evaluates every position; each move gets a centipawn loss."),
+        ("Explore", "Break results down by phase, colour, opening and time control."),
+        ("Practise", "Get three ranked priorities with examples from your own games."),
+    ]
+    st.markdown(
+        '<div class="cl-steps">' + "".join(
+            f'<div class="cl-step"><div class="n">Step {i}</div><div class="t">{ui.esc(t)}</div>'
+            f'<div class="d">{ui.esc(d)}</div></div>' for i, (t, d) in enumerate(steps, 1))
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _after_import(report: ingest.ParseReport, preferred_player: str | None) -> None:
@@ -375,7 +431,7 @@ def chesscom_import() -> None:
 
 
 def analysis_panel() -> None:
-    st.markdown("### Stockfish analysis")
+    ui.section("Stockfish analysis")
     conn = db.connect(user_db_path())
     try:
         players = db.list_players(conn)
@@ -780,21 +836,24 @@ def page_coaching() -> None:
                     "support them (a two-proportion z statistic against the rest of your games).")
         for i, rec in enumerate(recs, 1):
             examples = "".join(f"<li>{ui.esc(e['label'])}</li>" for e in rec.examples)
-            st.markdown(
-                f'<div class="cl-rec"><h3>{i}. {ui.esc(rec.title)}{ui.confidence_badge(rec.confidence)}</h3>'
-                f'<div class="evidence">{ui.esc(rec.evidence)}</div>'
-                f'<div class="advice"><b>Practice:</b> {ui.esc(rec.advice)}</div>'
-                + (f'<div class="evidence" style="margin-top:.6rem"><b>From your games:</b>'
-                   f'<ul style="margin:.2rem 0 0 0">{examples}</ul></div>' if examples else "")
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-            if rec.examples:
-                cols = st.columns(len(rec.examples) + 2)
-                for j, ex in enumerate(rec.examples):
-                    if cols[j].button(f"View example {j + 1}", key=f"ex_{i}_{j}", icon=":material/visibility:"):
-                        ss.explorer_move_id = ex["move_id"]
-                        st.switch_page(PAGES["mistakes"])
+            with st.container(border=True):
+                st.markdown(
+                    f'<div class="cl-rec"><div class="cl-rec-head"><span class="cl-rec-num">{i}</span>'
+                    f'<span class="cl-rec-title">{ui.esc(rec.title)}</span>'
+                    f'{ui.confidence_badge(rec.confidence)}</div>'
+                    f'<div class="evidence">{ui.esc(rec.evidence)}</div>'
+                    f'<div class="advice"><b>Practice:</b> {ui.esc(rec.advice)}</div>'
+                    + (f'<div class="examples">From your games:<ul>{examples}</ul></div>' if examples else "")
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+                if rec.examples:
+                    cols = st.columns(len(rec.examples) + 2)
+                    for j, ex in enumerate(rec.examples):
+                        if cols[j].button(f"View example {j + 1}", key=f"ex_{i}_{j}",
+                                          icon=":material/visibility:", width="stretch"):
+                            ss.explorer_move_id = ex["move_id"]
+                            st.switch_page(PAGES["mistakes"])
         if note:
             st.caption(note)
         st.caption("Recommendations are rule-based and only reference phases, colours, openings, time "

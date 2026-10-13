@@ -1,9 +1,31 @@
 [theme]
 base = "light"
-primaryColor = "#1F3B5B"
-backgroundColor = "#F7F8FA"
-secondaryBackgroundColor = "#EEF2F6"
-textColor = "#1E293B"
+primaryColor = "#171717"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F7F7"
+textColor = "#171717"
+linkColor = "#15803D"
+linkUnderline = false
+borderColor = "#EBEBEB"
+dataframeBorderColor = "#EFEFEF"
+dataframeHeaderBackgroundColor = "#FAFAFA"
+dataframeHeaderTextColor = "#525252"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "10px"
+buttonRadius = "8px"
+baseFontSize = 14
+greenColor = "#16A34A"
+greenBackgroundColor = "#ECFDF3"
+greenTextColor = "#067647"
+redColor = "#E5484D"
+redBackgroundColor = "#FEF3F2"
+redTextColor = "#B42318"
+chartCategoricalColors = ["#171717", "#2F9E6B", "#E5484D", "#F08A4B", "#A3A3A3"]
+
+[theme.sidebar]
+backgroundColor = "#FCFCFC"
+secondaryBackgroundColor = "#F5F5F5"
 
 [server]
 maxUploadSize = 5

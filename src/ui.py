@@ -9,72 +9,118 @@ import chess
 import chess.svg
 import streamlit as st
 
-NAVY = "#1F3B5B"
-TEAL = "#2A9D8F"
-AMBER = "#E9C46A"
-ORANGE = "#F4A261"
-RED = "#E76F51"
-SLATE = "#64748B"
-LIGHT = "#CBD5E1"
+INK = "#171717"
+MUTED = "#737373"
+GREEN = "#3DA673"
+AMBER = "#F5C451"
+ORANGE = "#F0915A"
+RED = "#E5605F"
+SLATE = "#A3A3A3"
+LIGHT = "#E5E5E5"
 
-CLASS_COLORS = {"good": TEAL, "inaccuracy": AMBER, "mistake": ORANGE, "blunder": RED}
-OUTCOME_COLORS = {"Win": TEAL, "Draw": "#94A3B8", "Loss": RED, "Unfinished": LIGHT}
-COLOR_COLORS = {"white": "#B8C4D3", "black": NAVY}
+CLASS_COLORS = {"good": "#D4D4D4", "inaccuracy": AMBER, "mistake": ORANGE, "blunder": RED}
+OUTCOME_COLORS = {"Win": GREEN, "Draw": "#C7C7C7", "Loss": RED, "Unfinished": LIGHT}
+COLOR_COLORS = {"white": LIGHT, "black": INK}
 
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 html, body, [class*="css"], .stMarkdown, .stText, button, input, textarea, select {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
-.block-container { padding-top: 3.2rem; padding-bottom: 3rem; max-width: 1320px; }
-h1, h2, h3 { letter-spacing: -0.01em; color: #0F172A; }
-.cl-brand { display:flex; align-items:baseline; gap:.6rem; margin-bottom:.15rem; }
-.cl-brand .logo { font-size: 2.1rem; font-weight: 700; color: #1F3B5B; letter-spacing:-0.02em; }
-.cl-brand .logo span { color: #2A9D8F; }
-.cl-brand .tag { color:#64748B; font-size:.95rem; }
-.cl-page-title { font-size: 1.55rem; font-weight: 650; color:#0F172A; margin: .2rem 0 .1rem 0; }
-.cl-page-sub { color:#64748B; font-size:.93rem; margin-bottom: 1.1rem; }
-.cl-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .8rem;
-  margin-bottom: 1rem; }
-.cl-card { background:#FFFFFF; border:1px solid #E5E7EB; border-radius: 12px; padding: .95rem 1.1rem;
-  box-shadow: 0 1px 2px rgba(15,23,42,.04); }
-.cl-card .label { color:#64748B; font-size:.78rem; font-weight:600; text-transform:uppercase;
-  letter-spacing:.04em; }
-.cl-card .value { color:#0F172A; font-size:1.65rem; font-weight:700; margin-top:.15rem; line-height:1.2; }
-.cl-card .sub { color:#64748B; font-size:.82rem; margin-top:.2rem; }
-.cl-card.accent { border-left: 4px solid #2A9D8F; }
-.cl-card.warn { border-left: 4px solid #E76F51; }
-.cl-hero { background: linear-gradient(135deg, #1F3B5B 0%, #24496F 60%, #2A9D8F 140%);
-  color: #F8FAFC; border-radius: 16px; padding: 2.1rem 2.2rem; margin-bottom: 1.2rem; }
-.cl-hero h1 { color:#FFFFFF; font-size: 2.3rem; margin: 0 0 .4rem 0; font-weight:700; }
-.cl-hero p { color:#DCE6F0; font-size: 1.04rem; max-width: 760px; margin:0; }
-.cl-feature { background:#FFFFFF; border:1px solid #E5E7EB; border-radius:12px; padding:1rem 1.1rem;
-  height:100%; }
-.cl-feature h4 { margin:0 0 .3rem 0; font-size:1rem; color:#1F3B5B; }
-.cl-feature p { margin:0; color:#475569; font-size:.9rem; }
-.cl-empty { border:1px dashed #CBD5E1; border-radius:12px; padding:2rem; text-align:center;
-  color:#64748B; background:#FAFBFC; }
-.cl-empty h4 { color:#334155; margin:0 0 .3rem 0; }
-.cl-rec { background:#FFFFFF; border:1px solid #E5E7EB; border-radius:14px; padding:1.1rem 1.3rem;
-  margin-bottom:.9rem; border-left: 5px solid #2A9D8F; }
-.cl-rec h3 { margin: 0 0 .35rem 0; font-size:1.15rem; }
-.cl-rec .evidence { color:#334155; font-size:.95rem; margin:.35rem 0; }
-.cl-rec .advice { color:#0F172A; font-size:.95rem; background:#F1F5F9; border-radius:8px;
-  padding:.6rem .8rem; margin-top:.5rem; }
-.cl-badge { display:inline-block; font-size:.72rem; font-weight:600; padding:.15rem .55rem;
-  border-radius:999px; background:#E6F4F1; color:#1E7268; margin-left:.4rem; vertical-align:middle; }
-.cl-badge.mod { background:#FDF3DC; color:#8A6514; }
-.cl-badge.weak { background:#EEF2F7; color:#475569; }
-.cl-pill { display:inline-block; padding:.12rem .55rem; border-radius:999px; font-size:.78rem;
-  font-weight:600; color:#FFFFFF; }
-.cl-board { display:flex; justify-content:center; }
-.cl-board svg { max-width: 100%; height: auto; border-radius: 6px; }
-.cl-kv { display:grid; grid-template-columns: 150px 1fr; row-gap:.35rem; font-size:.93rem; }
-.cl-kv .k { color:#64748B; } .cl-kv .v { color:#0F172A; font-weight:500; }
-.cl-footer { color:#94A3B8; font-size:.8rem; margin-top:1.2rem; }
-section[data-testid="stSidebar"] .cl-side-brand { font-weight:700; font-size:1.25rem; color:#1F3B5B; }
-section[data-testid="stSidebar"] .cl-side-brand span { color:#2A9D8F; }
+.block-container { padding-top: 3.4rem; padding-bottom: 4rem; max-width: 1180px; }
+h1, h2, h3, h4, h5 { color: #171717; letter-spacing: -0.011em; }
+h3 { font-size: 1.15rem !important; font-weight: 600 !important; }
+h4 { font-size: 1.02rem !important; font-weight: 600 !important; margin-top: .6rem; }
+hr { margin: 1rem 0 !important; }
+
+/* Page header */
+.cl-page-title { font-size: 1.6rem; font-weight: 600; color: #171717; letter-spacing: -0.02em;
+  margin: 0 0 .15rem 0; }
+.cl-page-sub { color: #737373; font-size: .95rem; margin-bottom: 1.4rem; }
+.cl-section { font-size: 1.02rem; font-weight: 600; color: #171717; margin: 1.6rem 0 .6rem 0; }
+
+/* Stat cards */
+.cl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .75rem;
+  margin-bottom: .9rem; }
+.cl-card { background: #FFFFFF; border: 1px solid #EBEBEB; border-radius: 12px; padding: .9rem 1rem; }
+.cl-card .label { color: #737373; font-size: .86rem; font-weight: 500; display: flex;
+  align-items: center; gap: .4rem; }
+.cl-card .value { color: #171717; font-size: 1.55rem; font-weight: 600; margin-top: .3rem;
+  line-height: 1.2; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.cl-card .sub { color: #A3A3A3; font-size: .82rem; margin-top: .25rem; }
+.cl-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.cl-dot.accent { background: #2F9E6B; }
+.cl-dot.warn { background: #E5484D; }
+
+/* Status badges and move-class pills */
+.cl-badge { display: inline-flex; align-items: center; gap: .3rem; font-size: .76rem; font-weight: 500;
+  padding: .1rem .5rem; border-radius: 6px; border: 1px solid #ABEFC6; background: #ECFDF3;
+  color: #067647; vertical-align: middle; line-height: 1.5; white-space: nowrap; }
+.cl-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.cl-badge.mod { border-color: #FEDF89; background: #FFFAEB; color: #B54708; }
+.cl-badge.weak { border-color: #E5E5E5; background: #FAFAFA; color: #525252; }
+.cl-badge.red { border-color: #FECDCA; background: #FEF3F2; color: #B42318; }
+.cl-badge.orange { border-color: #F9DBAF; background: #FEF6EE; color: #B93815; }
+.cl-badge.amber { border-color: #FEDF89; background: #FFFAEB; color: #B54708; }
+
+/* Home */
+.cl-greeting { font-size: 1.6rem; font-weight: 600; color: #171717; letter-spacing: -0.02em; margin: 0; }
+.cl-lead { color: #737373; font-size: .98rem; margin: .3rem 0 1.6rem 0; max-width: 720px; }
+.cl-preview { border: 1px solid #EBEBEB; border-radius: 12px; padding: 10px; background: #FAFAFA; }
+.cl-preview svg { width: 100%; height: auto; display: block; border-radius: 6px; }
+.cl-meta-title { display: flex; align-items: center; gap: .5rem; font-weight: 600; font-size: 1rem;
+  color: #171717; }
+.cl-meta { color: #737373; font-size: .9rem; margin-top: .3rem; }
+.cl-meta b { color: #171717; font-weight: 500; }
+.cl-label { color: #737373; font-size: .86rem; margin: 1rem 0 .15rem 0; }
+.cl-value { color: #171717; font-size: .92rem; font-weight: 500; }
+.cl-steps { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #EBEBEB;
+  border-radius: 12px; overflow: hidden; margin: .4rem 0 0 0; }
+.cl-step { padding: .85rem 1rem; border-right: 1px solid #EBEBEB; }
+.cl-step:last-child { border-right: none; }
+.cl-step .n { color: #A3A3A3; font-size: .78rem; font-weight: 500; }
+.cl-step .t { color: #171717; font-size: .92rem; font-weight: 600; margin: .15rem 0 .2rem 0; }
+.cl-step .d { color: #737373; font-size: .84rem; line-height: 1.45; }
+
+/* Recommendations */
+.cl-rec-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .45rem; }
+.cl-rec-num { width: 24px; height: 24px; border-radius: 6px; background: #F5F5F5; color: #525252;
+  font-size: .8rem; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+.cl-rec-title { font-size: 1.02rem; font-weight: 600; color: #171717; }
+.cl-rec .evidence { color: #525252; font-size: .92rem; line-height: 1.55; }
+.cl-rec .advice { color: #171717; font-size: .92rem; background: #FAFAFA; border: 1px solid #F0F0F0;
+  border-radius: 8px; padding: .6rem .8rem; margin-top: .7rem; line-height: 1.55; }
+.cl-rec .examples { color: #525252; font-size: .88rem; margin-top: .7rem; }
+.cl-rec .examples ul { margin: .25rem 0 0 0; padding-left: 1.1rem; }
+
+/* Empty state, board, key/value list */
+.cl-empty { border: 1px solid #EBEBEB; border-radius: 12px; padding: 2.2rem; text-align: center;
+  color: #737373; background: #FAFAFA; font-size: .92rem; }
+.cl-empty h4 { color: #171717; margin: 0 0 .3rem 0; font-size: 1rem; }
+.cl-board { display: flex; justify-content: center; border: 1px solid #EBEBEB; border-radius: 12px;
+  padding: 10px; background: #FFFFFF; }
+.cl-board svg { max-width: 100%; height: auto; border-radius: 4px; }
+.cl-kv { display: grid; grid-template-columns: 150px 1fr; font-size: .9rem; border: 1px solid #EBEBEB;
+  border-radius: 12px; overflow: hidden; }
+.cl-kv > div { padding: .5rem .85rem; border-bottom: 1px solid #F2F2F2; }
+.cl-kv > div:nth-last-child(-n+2) { border-bottom: none; }
+.cl-kv .k { color: #737373; background: #FAFAFA; }
+.cl-kv .v { color: #171717; font-weight: 500; }
+.cl-footer { color: #A3A3A3; font-size: .8rem; margin-top: 1.4rem; line-height: 1.5; }
+
+/* Charts sit in hairline cards, like the tables */
+[data-testid="stPlotlyChart"] { border: 1px solid #EBEBEB; border-radius: 12px; overflow: hidden;
+  background: #FFFFFF; box-sizing: border-box; }
+
+/* Sidebar */
+section[data-testid="stSidebar"] .cl-side-brand { display: flex; align-items: center; gap: .55rem;
+  font-weight: 600; font-size: 1.05rem; color: #171717; letter-spacing: -0.01em; }
+.cl-logo { width: 26px; height: 26px; border-radius: 7px; background: #171717; color: #FFFFFF;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1; }
+section[data-testid="stSidebar"] h5 { font-size: .8rem !important; font-weight: 500 !important;
+  color: #737373 !important; margin: .8rem 0 0 0; }
 </style>
 """
 
@@ -95,14 +141,19 @@ def page_header(title: str, subtitle: str = "") -> None:
     )
 
 
+def section(title: str) -> None:
+    st.markdown(f'<div class="cl-section">{esc(title)}</div>', unsafe_allow_html=True)
+
+
 def stat_cards(cards: Iterable[tuple], cols: int | None = None) -> None:
     """``cards``: iterable of (label, value, sub[, style]) where style is '', 'accent' or 'warn'."""
     parts = []
     for card in cards:
         label, value, sub = card[0], card[1], card[2]
         style = card[3] if len(card) > 3 else ""
+        dot = f'<span class="cl-dot {esc(style)}"></span>' if style else ""
         parts.append(
-            f'<div class="cl-card {esc(style)}"><div class="label">{esc(label)}</div>'
+            f'<div class="cl-card"><div class="label">{dot}{esc(label)}</div>'
             f'<div class="value">{esc(value)}</div><div class="sub">{esc(sub)}</div></div>'
         )
     grid_style = f' style="grid-template-columns: repeat({cols}, 1fr);"' if cols else ""
@@ -116,26 +167,32 @@ def empty_state(title: str, body: str) -> None:
     )
 
 
+def badge(text: str, tone: str = "") -> str:
+    return f'<span class="cl-badge {esc(tone)}">{esc(text)}</span>'
+
+
+CLASS_TONES = {"good": "", "inaccuracy": "amber", "mistake": "orange", "blunder": "red"}
+
+
 def class_pill(classification: str) -> str:
-    color = CLASS_COLORS.get(classification, SLATE)
-    return f'<span class="cl-pill" style="background:{color}">{esc(classification.title())}</span>'
+    return badge(classification.title(), CLASS_TONES.get(classification, "weak"))
 
 
 def confidence_badge(label: str) -> str:
-    cls = "" if label.startswith("Strong") else ("mod" if label.startswith("Moderate") else "weak")
-    return f'<span class="cl-badge {cls}">{esc(label)}</span>'
+    tone = "" if label.startswith("Strong") else ("mod" if label.startswith("Moderate") else "weak")
+    return badge(label, tone)
 
 
 def board_svg(fen: str, played_uci: str | None, best_uci: str | None, orientation: str = "white",
-              size: int = 440) -> str:
+              size: int = 440, coordinates: bool = True) -> str:
     board = chess.Board(fen)
     arrows = []
     if best_uci and best_uci != played_uci:
         mv = chess.Move.from_uci(best_uci)
-        arrows.append(chess.svg.Arrow(mv.from_square, mv.to_square, color="#2A9D8Fcc"))
+        arrows.append(chess.svg.Arrow(mv.from_square, mv.to_square, color="#2F9E6Bcc"))
     if played_uci:
         mv = chess.Move.from_uci(played_uci)
-        arrows.append(chess.svg.Arrow(mv.from_square, mv.to_square, color="#E76F51d0"))
+        arrows.append(chess.svg.Arrow(mv.from_square, mv.to_square, color="#E5484Dcc"))
     check = board.king(board.turn) if board.is_check() else None
     return chess.svg.board(
         board,
@@ -143,12 +200,12 @@ def board_svg(fen: str, played_uci: str | None, best_uci: str | None, orientatio
         arrows=arrows,
         check=check,
         size=size,
-        coordinates=True,
+        coordinates=coordinates,
         colors={
-            "square light": "#EEF2F6",
-            "square dark": "#7F97B2",
-            "margin": "#1F3B5B",
-            "coord": "#E2E8F0",
+            "square light": "#F0F0EE",
+            "square dark": "#B9BCB8",
+            "margin": "#FFFFFF",
+            "coord": "#A3A3A3",
         },
     )
 
