@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Local engine binaries (installed via scripts/install_stockfish.py)
+bin/
+
+# Raw downloads and per-session user data
+data/raw/
+data/sessions/
+data/cache/
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Secrets / local config
+.streamlit/secrets.toml
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
