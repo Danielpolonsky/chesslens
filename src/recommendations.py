@@ -66,7 +66,10 @@ def _pct(x: float) -> str:
     return f"{100 * x:.1f}%"
 
 
-def _examples(conn, player, filters, where: str = "", params: list | None = None, n: int = 2) -> list[dict]:
+EXAMPLES_PER_REC = 2
+
+
+def _examples(conn, player, filters, where: str = "", params: list | None = None, n: int = 6) -> list[dict]:
     df = an.mistakes(conn, player, filters, extra_where=where, extra_params=params, limit=n)
     out = []
     for r in df.itertuples():
@@ -343,6 +346,11 @@ def generate(conn: sqlite3.Connection, player: str, filters: an.Filters | None =
         seen_kinds.add(kind)
         if len(chosen) == top_n:
             break
+    used: set[int] = set()
+    for rec in chosen:
+        fresh = [e for e in rec.examples if e["move_id"] not in used][:EXAMPLES_PER_REC]
+        used.update(e["move_id"] for e in fresh)
+        rec.examples = fresh
     note = None
     if len(chosen) < top_n:
         note = (

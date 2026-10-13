@@ -9,11 +9,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 DEMO_DIR = DATA_DIR / "demo"
 DEMO_DB_PATH = DEMO_DIR / "demo.db"
-ML_CORPUS_DB_PATH = DEMO_DIR / "ml_corpus.db"
 MODELS_DIR = DATA_DIR / "models"
 ML_METRICS_PATH = MODELS_DIR / "ml_metrics.json"
 ML_MODEL_PATH = MODELS_DIR / "risk_model.joblib"
-SESSIONS_DIR = DATA_DIR / "sessions"
 BIN_DIR = ROOT_DIR / "bin"
 
 # Project-defined centipawn-loss thresholds (NOT official Chess.com/Lichess classifications).
@@ -46,6 +44,7 @@ MAX_UPLOAD_GAMES = _env_int("CHESSLENS_MAX_UPLOAD_GAMES", 500)
 MAX_UPLOAD_BYTES = _env_int("CHESSLENS_MAX_UPLOAD_BYTES", 5 * 1024 * 1024)
 ENGINE_THREADS = _env_int("CHESSLENS_ENGINE_THREADS", 1)
 ENGINE_HASH_MB = _env_int("CHESSLENS_ENGINE_HASH_MB", 64)
+MAX_CONCURRENT_ANALYSES = _env_int("CHESSLENS_MAX_CONCURRENT_ANALYSES", 2)
 
 CHESSCOM_DEFAULT_GAMES = 25
 CHESSCOM_MAX_GAMES = 100
