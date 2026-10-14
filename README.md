@@ -1,16 +1,15 @@
 # ChessLens
 
-**Stockfish-powered chess analytics: find where your games go wrong and what to practise next.**
+**Import your chess games, review your biggest mistakes, and find what to practice next.**
 
-ChessLens imports your games (PGN upload or the public Chess.com API), runs every position through
-Stockfish, stores the results in a normalized SQLite database and turns them into an interactive
-Streamlit dashboard: performance by phase, colour and time control, opening statistics with sample
-sizes, a move-by-move mistake explorer, ranked coaching recommendations and an experimental
-machine-learning model that estimates the risk of a serious mistake in a position.
+ChessLens helps a player answer three questions: how am I performing, where am I making costly
+mistakes, and what should I practice next? Import a PGN or recent Chess.com games, or open the
+demo. Stockfish then scores the moves. The dashboard, mistake review and practice page stay in
+front; the SQL schema, engine settings and risk model are documented on secondary pages.
 
 *Built for Polonsky Academy.*
 
-![Home page](docs/screenshots/home.png)
+![Start page](docs/screenshots/start.png)
 
 ---
 
@@ -41,53 +40,52 @@ machine-learning model that estimates the risk of a serious mistake in a positio
   `5xx` responses, honouring `Retry-After` with backoff.
 - **Try Demo:** one click loads 158 public Lichess games that were analysed in advance (see
   [Demo dataset](#demo-dataset)).
-- **Duplicate handling:** re-importing the same game is detected through a content hash and skipped.
+- **Duplicate handling:** a repeated game inside one file is kept once. Re-importing a game already
+  stored is detected through a content hash and not inserted again. Illegal moves, unreadable move
+  text, unsupported variants and invalid starting positions are rejected and counted, not shortened
+  into a legal game.
 
 **Stockfish analysis**
 - Every position is evaluated, and centipawn loss is computed from the mover's perspective. Mate
   scores are mapped to ±10,000 cp and clamped to ±1,000 cp.
-- Depth is configurable (6–14, default 10). Evaluations are cached per position and depth, so
-  repeated positions such as common opening moves are evaluated only once.
+- Depth is configurable (6–14, default 10). A cached evaluation is reused only when the position,
+  the depth and the engine settings match, so a deeper search is not mixed into a shallower one.
 - Analysis runs in a background thread with a live progress bar and a cancel button, so the
   dashboard stays usable. A per-run game cap and a server-wide limit on simultaneous engine jobs
   protect a shared deployment.
 - Works on Windows, Linux and macOS. The engine is found through `STOCKFISH_PATH`, the system
   `PATH`, common install locations, or the project's `bin/` folder.
 
-**Dashboard**
-- **Overview:** record, score, average centipawn loss, error rates, rating trend and results by colour.
-- **Performance:** error rates by phase and colour, centipawn-loss distribution, errors by move
-  number, time-control comparison, results after winning or losing positions, time-pressure
-  statistics (when the PGN contains clock data) and trends over time. Filters apply to every page:
-  colour, date range, time control and opening.
-- **Openings:** games, score, win rate with a 95% Wilson interval, average centipawn loss and
-  opening-phase error rate per opening family. Small samples are flagged.
-- **Mistake Explorer:** browse every inaccuracy, mistake and blunder on an SVG board with arrows
-  for the played move (red) and the engine's best move (green), plus the evaluation curve of the
-  game and a link to the original game.
-- **Coaching:** the top three practice priorities ranked by statistical evidence, each with the
-  supporting numbers, concrete advice and real example positions from your games. Exports include
-  a Markdown coaching summary, move-level CSV and game-level CSV.
-- **ML Insights:** model comparison against a baseline, precision-recall curves, calibration,
-  feature importance and the model's risk estimates applied to the selected player.
-- **Methodology:** every threshold, formula and limitation used in the app, documented in the app itself.
+**Main pages**
+- **Start:** try the demo, or import a PGN or Chess.com games, then run Stockfish. Imported,
+  analyzed and waiting games are counted separately.
+- **Dashboard:** games analyzed, score and average centipawn loss first. Result shares, error rates
+  and approximate accuracy sit in a details section. Trends, error patterns and openings are views
+  on this page, not extra destinations. Colour and time control are always available; date and
+  opening filters are under "More filters".
+- **Review mistakes:** the board, the played move, the engine move and the centipawn loss. The
+  board is labeled from the side you played, and the engine arrow is dashed as well as green.
+- **Practice:** the single strongest rule-based priority, with the numbers and one example that
+  opens that exact position. Other priorities and the Markdown/CSV exports sit below.
+
+**Technical pages**
+- **ML insights:** ranking quality on the held-out test games, a separate check on every position
+  in the demo games (both players), and a separate score for the selected player's own moves.
+  Average precision and ROC AUC are not called accuracy.
+- **Methodology:** the definitions of score, win rate, centipawn loss and approximate accuracy.
 
 ## Screenshots
 
 All screenshots show the real demo dataset, captured from the running app with
 `scripts/take_screenshots.py`.
 
-| Overview | Performance |
+| Dashboard | Review mistakes |
 | --- | --- |
-| ![Overview](docs/screenshots/overview.png) | ![Performance](docs/screenshots/performance.png) |
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Review mistakes](docs/screenshots/mistakes.png) |
 
-| Openings | Mistake Explorer |
+| Practice | ML insights |
 | --- | --- |
-| ![Openings](docs/screenshots/openings.png) | ![Mistake Explorer](docs/screenshots/mistakes.png) |
-
-| Coaching | ML Insights |
-| --- | --- |
-| ![Coaching](docs/screenshots/coaching.png) | ![ML Insights](docs/screenshots/ml_insights.png) |
+| ![Practice](docs/screenshots/practice.png) | ![ML insights](docs/screenshots/ml_insights.png) |
 
 ## Tech stack
 
@@ -131,6 +129,7 @@ src/analytics.py           SQL analytics queries, Wilson interval, two-proportio
 src/recommendations.py     Rule-based coaching recommendations ranked by z statistic
 src/ml.py                  Serious-mistake risk model: training, evaluation, inference
 src/charts.py, src/ui.py   Plotly charts, board rendering and styling
+src/ui_state.py            Filter text and mistake-list selection (unit-tested)
 src/reporting.py           CSV export and Markdown coaching summary
 scripts/                   Demo/model build, Stockfish installer, screenshots, UI smoke test
 tests/                     pytest suite
@@ -141,7 +140,7 @@ data/models/               Trained model, metrics and training frame
 **Database schema.** `players`, `games` (metadata plus a unique content hash), `moves` (one row
 per ply with the position before the move and pre-move board features), `move_analysis`
 (evaluations, best move, centipawn loss, classification, accuracy), `position_evals` (engine cache
-keyed by position and depth) and `analysis_runs`. The view `v_player_games` presents every game
+keyed by position, depth and engine settings) and `analysis_runs`. The view `v_player_games` presents every game
 from each player's perspective (colour, own and opponent rating, score), which keeps the analytics
 queries simple: they are composed from common table expressions over this view.
 
@@ -258,8 +257,10 @@ to make a serious error (CPL ≥ 100) in this position?
 | Logistic regression | 0.284 ± 0.010 | 0.279 | 0.656 | 0.268 | 0.600 | 0.371 | 1.70× |
 | **Random forest** (selected) | 0.312 ± 0.011 | 0.301 | 0.686 | 0.271 | 0.708 | 0.392 | 1.91× |
 
-**External check:** on the demo player's 9,513 positions, which are not in the corpus (base rate
-17.3%), the random forest scored AP 0.285, ROC AUC 0.676 and a top-decile lift of 1.88×.
+**External check:** every position in the demo games, including the opponent's moves: 9,513
+positions from games that were not used in training or model selection (base rate 17.3%). The
+random forest scored AP 0.285, ROC AUC 0.676 and a top-decile lift of 1.88×. That is not the same
+figure as the selected player's own 4,744 moves.
 
 **Interpretation.** The model is clearly better than the baseline but **weak in absolute terms**.
 - *What it can do:* rank positions by risk. The 10% of test positions it rates riskiest contain
@@ -299,7 +300,7 @@ python scripts/install_stockfish.py
 streamlit run app.py
 ```
 
-Then open <http://localhost:8501> and click **Try Demo**, or import your own games.
+Then open <http://localhost:8501> and click **Try demo**, or import your own games.
 
 **Configuration** (optional environment variables):
 
@@ -344,7 +345,7 @@ slightly from a local run. The demo itself is unaffected because it is pre-analy
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                                   # 87 tests
+pytest                                   # 108 tests at last local run
 ```
 
 The suite covers the following areas; the end-to-end tests are skipped automatically if Stockfish
@@ -360,7 +361,7 @@ is not installed:
 - recommendation ranking and reports;
 - an end-to-end import, analyse and query run;
 - the background job and its engine-slot queue;
-- Streamlit `AppTest` renders of every page.
+- Streamlit `AppTest` renders of the demo pages, including the jump from a practice example to that move.
 
 A browser-level smoke test drives the running app with Playwright. It loads every demo page,
 uploads a PGN, runs the analysis, re-uploads the file to check duplicate detection and optionally
@@ -375,8 +376,10 @@ python scripts/ui_smoke_test.py [--chesscom USERNAME]
 ## Privacy and public-deployment limits
 
 - **Each browser session gets its own private SQLite file**, stored in the system temp directory
-  under a random UUID. No user can query another session's data. Session files are deleted after
-  12 hours.
+  under a random UUID. Other visitors cannot open it. Refreshing the page starts a new session, so
+  the previous import disappears from the app. A cleanup runs at most once an hour, and only while
+  the app is being used, and deletes session files that have not been touched for 12 hours. Someone
+  with access to the server can still read those files.
 - **The demo database is opened read-only** and is never mixed with uploaded data.
 - **The app stores no API keys or credentials.** The Chess.com endpoints are public and need no key.
 - **Resource limits for public use:**
@@ -388,7 +391,12 @@ python scripts/ui_smoke_test.py [--chesscom USERNAME]
 ## Limitations
 
 - **Data is per session.** Refreshing the browser starts a new session, so uploaded games must be
-  imported again. There are no user accounts.
+  imported again. There are no user accounts. Expired files are removed only when the app is used,
+  and at most hourly.
+- **Large PGN uploads spend their time on parsing.** Every position is turned into board features
+  before it is stored, so a few hundred games take longer to import than a short Stockfish run.
+- **The evaluation cache ignores the halfmove clock.** Two positions that differ only by that
+  counter share one cached evaluation.
 - **Shallow analysis.** Depth 10 is fast but imperfect; some "errors" at this depth are engine noise.
 - **Thresholds and phase boundaries are heuristics** chosen for this project.
 - **No tactical motif detection** (forks, pins, and so on), and no opening theory beyond the PGN's

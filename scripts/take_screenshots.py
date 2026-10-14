@@ -17,13 +17,12 @@ from playwright.sync_api import sync_playwright
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "screenshots"
 PAGES = [
-    ("home", "", 1000),
-    ("overview", "overview?demo=1", 1500),
-    ("performance", "performance?demo=1", 2300),
-    ("openings", "openings?demo=1", 1500),
-    ("mistakes", "mistakes?demo=1", 1250),
-    ("coaching", "coaching?demo=1", 1450),
-    ("ml_insights", "ml?demo=1", 1900),
+    ("start", "", 1100),
+    ("dashboard", "dashboard?demo=1", 1600),
+    ("mistakes", "mistakes?demo=1", 1100),
+    ("practice", "practice?demo=1", 1200),
+    ("ml_insights", "ml?demo=1", 1700),
+    ("methodology", "methodology?demo=1", 1400),
 ]
 
 WAIT_JS = """() => {

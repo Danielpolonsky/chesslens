@@ -1130,7 +1130,7 @@
     "Predicted risks are associations, not causes, and are only moderately better than the base rate - useful for ranking positions, not for confident individual predictions."
   ],
   "external_evaluation": {
-    "description": "Demo player's games (never used in training or model selection)",
+    "description": "Every position in the demo games, moves by the demo player and by their opponents (games never used in training or model selection)",
     "n_positions": 9513,
     "n_games": 158,
     "positive_rate": 0.17344686218858404,

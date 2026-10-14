@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import re
 import time
 from collections import Counter
@@ -25,6 +26,18 @@ from .features import position_features
 VALID_RESULTS = {"1-0", "0-1", "1/2-1/2"}
 OPENING_KEYWORDS = ("Defense", "Defence", "Opening", "Game", "Gambit", "Attack", "System")
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{2,30}$")
+SUPPORTED_VARIANTS = {"standard", "chess", "from position"}
+
+# python-chess logs every rejected token; rejections are reported to the user instead.
+logging.getLogger("chess.pgn").setLevel(logging.CRITICAL)
+
+# Rejection reasons shown in the import summary.
+REASON_ILLEGAL = "illegal move"
+REASON_UNREADABLE = "unreadable move text"
+REASON_VARIANT = "unsupported variant"
+REASON_EMPTY = "no moves"
+REASON_FEN = "invalid starting position (FEN)"
+REASON_ERROR = "could not be processed"
 
 
 @dataclass
@@ -79,9 +92,32 @@ class ParsedGame:
 @dataclass
 class ParseReport:
     games: list[ParsedGame] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)  # file-level problems and per-game rejections
     skipped: int = 0
     truncated: bool = False
+    games_read: int = 0
+    skip_reasons: Counter = field(default_factory=Counter)
+    duplicates_in_file: int = 0
+    notes: list[str] = field(default_factory=list)
+
+    def reject(self, index: int, reason: str, detail: str = "") -> None:
+        self.skipped += 1
+        self.skip_reasons[reason] += 1
+        self.errors.append(f"Game {index}: {reason}" + (f" ({detail})" if detail else "") + ".")
+
+    def merge(self, other: "ParseReport") -> None:
+        self.errors.extend(other.errors)
+        self.skipped += other.skipped
+        self.games_read += other.games_read
+        self.skip_reasons.update(other.skip_reasons)
+        self.duplicates_in_file += other.duplicates_in_file
+
+
+class GameRejected(ValueError):
+    def __init__(self, reason: str, detail: str = ""):
+        super().__init__(detail or reason)
+        self.reason = reason
+        self.detail = detail
 
 
 # ---------------------------------------------------------------------------
@@ -175,11 +211,65 @@ def opening_family(name: str | None, eco: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _game_to_parsed(game: chess.pgn.Game, source: str) -> ParsedGame | None:
+_HEADER_LINE_RE = re.compile(r'^\s*\[\w+\s+"')
+_COMMENT_RE = re.compile(r"\{[^}]*\}")
+_LINE_COMMENT_RE = re.compile(r";[^\n]*")
+_NAG_RE = re.compile(r"\$\d+")
+_MOVE_NUMBER_RE = re.compile(r"^\d+\.+")
+_ANNOTATION_RE = re.compile(r"[!?]+$")
+_RESULT_TOKENS = {"1-0", "0-1", "1/2-1/2", "*"}
+_CASTLING_TOKENS = {"O-O", "O-O-O", "0-0", "0-0-0", "--"}
+
+
+def mainline_tokens(raw_game: str) -> list[str]:
+    """Move tokens of a game's main line (comments, variations, NAGs, numbers removed).
+
+    python-chess silently ignores tokens it cannot read (e.g. ``Zz9``), which would make
+    a damaged game look complete. Comparing this count with the parsed move count
+    exposes such games.
+    """
+    body = "\n".join(
+        line for line in raw_game.splitlines()
+        if not _HEADER_LINE_RE.match(line) and not line.startswith("%")
+    )
+    body = _LINE_COMMENT_RE.sub(" ", _COMMENT_RE.sub(" ", body))
+    kept, depth = [], 0
+    for ch in body:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            kept.append(ch)
+            continue
+        kept.append(" ")
+    tokens = []
+    for tok in _NAG_RE.sub(" ", "".join(kept)).split():
+        tok = _ANNOTATION_RE.sub("", _MOVE_NUMBER_RE.sub("", tok))
+        if tok and tok not in _RESULT_TOKENS:
+            tokens.append(tok)
+    return tokens
+
+
+def _first_unreadable(tokens: list[str]) -> str | None:
+    return next((t for t in tokens if t not in _CASTLING_TOKENS and not chess.SAN_REGEX.match(t)), None)
+
+
+def _game_to_parsed(game: chess.pgn.Game, source: str, raw: str | None = None) -> ParsedGame:
+    """Validate and convert one game; raises ``GameRejected`` with a user-facing reason."""
     headers = game.headers
-    variant = headers.get("Variant", "Standard").lower()
-    if variant not in {"standard", "chess", "from position"}:
-        return None
+    variant = headers.get("Variant", "Standard").strip().lower()
+    if variant not in SUPPORTED_VARIANTS:
+        raise GameRejected(REASON_VARIANT, headers.get("Variant", ""))
+    if raw is not None:
+        tokens = mainline_tokens(raw)
+        n_parsed = sum(1 for _ in game.mainline_moves())
+        if len(tokens) > n_parsed:
+            bad = _first_unreadable(tokens)
+            raise GameRejected(
+                REASON_UNREADABLE,
+                f"read {n_parsed} of {len(tokens)} moves" + (f"; could not read '{bad}'" if bad else ""),
+            )
 
     board = game.board()
     moves: list[ParsedMove] = []
@@ -196,7 +286,7 @@ def _game_to_parsed(game: chess.pgn.Game, source: str) -> ParsedGame | None:
     for ply, node in enumerate(game.mainline(), start=1):
         move = node.move
         if move is None or not board.is_legal(move):
-            return None
+            raise GameRejected(REASON_ILLEGAL, f"move {ply} is not legal in its position")
         mover = board.turn
         moves.append(
             ParsedMove(
@@ -217,7 +307,7 @@ def _game_to_parsed(game: chess.pgn.Game, source: str) -> ParsedGame | None:
         board.push(move)
 
     if not moves:
-        return None
+        raise GameRejected(REASON_EMPTY)
     if not has_clock:
         for m in moves:
             m.clock_before_s = None
@@ -267,7 +357,9 @@ def parse_pgn_text(text: str, source: str = "pgn_upload", max_games: int | None 
 
     handle = io.StringIO(text)
     index = 0
+    seen: set[str] = set()
     while True:
+        start = handle.tell()
         try:
             game = chess.pgn.read_game(handle)
         except Exception as exc:  # pragma: no cover - python-chess is very tolerant
@@ -275,36 +367,70 @@ def parse_pgn_text(text: str, source: str = "pgn_upload", max_games: int | None 
             break
         if game is None:
             break
+        raw = text[start:handle.tell()]
+        if not raw.strip():
+            break
         index += 1
+        report.games_read += 1
         if game.errors:
-            report.skipped += 1
-            report.errors.append(f"Game {index}: illegal or unreadable move ({game.errors[0]}).")
+            message = str(game.errors[0])
+            reason = (REASON_ILLEGAL if "illegal" in message
+                      else REASON_FEN if "fen" in message.lower() else REASON_UNREADABLE)
+            report.reject(index, reason, str(game.errors[0]))
             continue
         try:
-            parsed = _game_to_parsed(game, source)
-        except Exception as exc:
-            parsed = None
-            report.errors.append(f"Game {index}: could not be processed ({exc}).")
-        if parsed is None:
-            report.skipped += 1
+            parsed = _game_to_parsed(game, source, raw)
+        except GameRejected as exc:
+            report.reject(index, exc.reason, exc.detail)
             continue
+        except Exception as exc:
+            report.reject(index, REASON_ERROR, str(exc))
+            continue
+        if parsed.game_hash in seen:
+            report.duplicates_in_file += 1
+            continue
+        seen.add(parsed.game_hash)
         report.games.append(parsed)
         if max_games is not None and len(report.games) >= max_games:
-            report.truncated = handle.read(1) != ""
+            report.truncated = bool(handle.read().strip())
             break
 
-    if not report.games and not report.errors:
+    if not report.games and not report.errors and not report.duplicates_in_file:
         report.errors.append("No complete games were found in the file.")
     return report
 
 
-def decode_upload(raw: bytes) -> str:
-    for encoding in ("utf-8-sig", "latin-1"):
+class UploadError(ValueError):
+    """The uploaded bytes cannot be read as a PGN text file."""
+
+
+def decode_pgn_bytes(raw: bytes) -> tuple[str, str | None]:
+    """Decode an uploaded file. Returns ``(text, warning)``; raises ``UploadError``."""
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
         try:
-            return raw.decode(encoding)
+            return raw.decode("utf-16"), None
+        except UnicodeDecodeError as exc:
+            raise UploadError("The file claims to be UTF-16 but could not be decoded.") from exc
+    try:
+        return raw.decode("utf-8-sig"), None
+    except UnicodeDecodeError:
+        pass
+    if b"\x00" in raw:
+        raise UploadError("This does not look like a text PGN file (it contains binary data).")
+    for encoding in ("cp1252", "latin-1"):
+        try:
+            text = raw.decode(encoding)
         except UnicodeDecodeError:
             continue
-    return raw.decode("utf-8", errors="replace")
+        return text, (
+            "The file is not UTF-8, so it was read as Windows-1252 text. "
+            "Accented player names may look wrong."
+        )
+    raise UploadError("The file's text encoding could not be recognized.")  # pragma: no cover
+
+
+def decode_upload(raw: bytes) -> str:
+    return decode_pgn_bytes(raw)[0]
 
 
 def candidate_players(games: Iterable[ParsedGame]) -> list[tuple[str, int]]:
@@ -402,11 +528,15 @@ def fetch_chesscom_games(
 
     raw_games = raw_games[:max_games]
     report = ParseReport()
+    seen: set[str] = set()
     for g in reversed(raw_games):  # oldest first
         sub = parse_pgn_text(g["pgn"], source="chess.com")
-        report.errors.extend(sub.errors)
-        report.skipped += sub.skipped
+        report.merge(sub)
         for parsed in sub.games:
+            if parsed.game_hash in seen:
+                report.duplicates_in_file += 1
+                continue
+            seen.add(parsed.game_hash)
             if g.get("time_class"):
                 parsed.time_class = g["time_class"]
             if parsed.played_at is None and g.get("end_time"):

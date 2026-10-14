@@ -1,4 +1,5 @@
 import math
+import sqlite3
 
 import pandas as pd
 import pytest
@@ -120,9 +121,11 @@ def test_unanalyzed_games_and_cache(tmp_db):
     conn, _ = tmp_db
     db.insert_games(conn, parse_pgn_text(SCHOLARS_MATE).games)
     assert db.unanalyzed_games(conn, "alice", 10) == [1]
-    db.cache_put(conn, "key", 12, PositionEval(35, None, "e2e4"))
-    assert db.cache_get(conn, "key", 10).score_cp == 35  # deeper result satisfies shallower request
-    assert db.cache_get(conn, "key", 14) is None
+    engine = "Stockfish 19|hash=64|threads=1"
+    db.cache_put(conn, "key", 12, engine, PositionEval(35, None, "e2e4"))
+    assert db.cache_get(conn, "key", 12, engine).score_cp == 35
+    assert db.cache_get(conn, "key", 10, engine) is None  # a different depth is a different result
+    assert db.cache_get(conn, "key", 12, "other-engine") is None
 
 
 def test_wilson_interval_and_z():
@@ -132,6 +135,24 @@ def test_wilson_interval_and_z():
     assert an.two_proportion_z(30, 100, 10, 100) > 3
     assert an.two_proportion_z(10, 100, 10, 100) == 0
     assert an.two_proportion_z(1, 0, 1, 1) == 0.0
+
+
+def test_legacy_cache_without_engine_is_dropped(tmp_path):
+    path = tmp_path / "legacy.db"
+    raw = sqlite3.connect(path)
+    raw.execute(
+        """CREATE TABLE position_evals (
+               position_key TEXT, depth INTEGER, score_cp INTEGER, mate INTEGER,
+               best_move_uci TEXT, PRIMARY KEY (position_key, depth))"""
+    )
+    raw.execute("INSERT INTO position_evals VALUES ('k', 10, 35, NULL, 'e2e4')")
+    raw.commit()
+    raw.close()
+    conn = db.connect(path)
+    assert db.cache_get(conn, "k", 10, "Stockfish 19|hash=64|threads=1") is None
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(position_evals)")}
+    assert "engine" in cols
+    conn.close()
 
 
 def test_list_players_counts(analyzed_db):

@@ -64,13 +64,16 @@ CREATE TABLE IF NOT EXISTS moves (
 );
 
 -- Engine evaluations keyed by position; doubles as the analysis cache.
+-- Engine cache. ``engine`` identifies the binary and the settings that can change a
+-- result (name/version, threads, hash); lookups require an exact engine and depth match.
 CREATE TABLE IF NOT EXISTS position_evals (
     position_key    TEXT NOT NULL,
     depth           INTEGER NOT NULL,
+    engine          TEXT NOT NULL,
     score_cp        INTEGER NOT NULL,
     mate            INTEGER,
     best_move_uci   TEXT,
-    PRIMARY KEY (position_key, depth)
+    PRIMARY KEY (position_key, depth, engine)
 );
 
 CREATE TABLE IF NOT EXISTS move_analysis (
@@ -145,10 +148,18 @@ def connect(path: str | Path, read_only: bool = False) -> sqlite3.Connection:
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
         conn.execute("PRAGMA journal_mode=WAL")
+        _drop_legacy_cache(conn)
         conn.executescript(SCHEMA)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def _drop_legacy_cache(conn: sqlite3.Connection) -> None:
+    """Older databases cached evals without recording the engine; such rows cannot be trusted."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(position_evals)")}
+    if cols and "engine" not in cols:
+        conn.execute("DROP TABLE position_evals")
 
 
 def query_df(conn: sqlite3.Connection, sql: str, params: Sequence | dict = ()) -> pd.DataFrame:
@@ -240,22 +251,28 @@ def save_game_analysis(
         )
 
 
-def cache_get(conn: sqlite3.Connection, key: str, depth: int) -> PositionEval | None:
-    """Return a cached eval searched at ``depth`` or deeper."""
+def cache_get(conn: sqlite3.Connection, key: str, depth: int, engine: str) -> PositionEval | None:
+    """Return a cached eval made by the same engine/settings at exactly ``depth``.
+
+    Deeper results are not reused: mixing depths inside one analysis would make
+    centipawn losses from different runs incomparable.
+    """
     row = conn.execute(
         """SELECT score_cp, mate, best_move_uci FROM position_evals
-           WHERE position_key = ? AND depth >= ? ORDER BY depth DESC LIMIT 1""",
-        (key, depth),
+           WHERE position_key = ? AND depth = ? AND engine = ?""",
+        (key, depth, engine),
     ).fetchone()
     if row is None:
         return None
     return PositionEval(score_cp=row[0], mate=row[1], best_move_uci=row[2])
 
 
-def cache_put(conn: sqlite3.Connection, key: str, depth: int, ev: PositionEval) -> None:
+def cache_put(conn: sqlite3.Connection, key: str, depth: int, engine: str, ev: PositionEval) -> None:
     conn.execute(
-        "INSERT OR REPLACE INTO position_evals VALUES (?,?,?,?,?)",
-        (key, depth, ev.score_cp, ev.mate, ev.best_move_uci),
+        """INSERT OR REPLACE INTO position_evals
+               (position_key, depth, engine, score_cp, mate, best_move_uci)
+           VALUES (?,?,?,?,?,?)""",
+        (key, depth, engine, ev.score_cp, ev.mate, ev.best_move_uci),
     )
 
 

@@ -148,12 +148,16 @@ def test_engine_cache_avoids_repeat_analysis():
     store = {}
     with StockfishAnalyzer(
         depth=6,
-        cache_get=lambda k, d: store.get((k, d)),
-        cache_put=lambda k, d, e: store.__setitem__((k, d), e),
+        cache_get=lambda k, d, e: store.get((k, d, e)),
+        cache_put=lambda k, d, e, ev: store.__setitem__((k, d, e), ev),
     ) as sf:
         sf.evaluate(chess.Board())
         sf.evaluate(chess.Board())
         assert sf.engine_calls == 1 and sf.cache_hits == 1
-    with StockfishAnalyzer(depth=6, cache_get=lambda k, d: store.get((k, d))) as sf2:
+        assert sf.engine_id
+    with StockfishAnalyzer(depth=6, cache_get=lambda k, d, e: store.get((k, d, e))) as sf2:
         sf2.evaluate(chess.Board())
-        assert sf2.engine_calls == 0  # served from the persistent cache
+        assert sf2.engine_calls == 0  # same engine id and depth, served from the persistent cache
+    with StockfishAnalyzer(depth=8, cache_get=lambda k, d, e: store.get((k, d, e))) as sf3:
+        sf3.evaluate(chess.Board())
+        assert sf3.engine_calls == 1  # a different depth is not reused

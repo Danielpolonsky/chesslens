@@ -41,7 +41,7 @@ def coaching_summary(
         f"- Games: {overview['games']} (engine-analyzed: {overview['analyzed_games']})",
         f"- Results: {overview['wins']}W / {overview['draws']}D / {overview['losses']}L "
         f"(score {_pct(overview['avg_score'])})",
-        f"- Analyzed moves: {overview['moves']}",
+        f"- Analyzed moves by this player: {overview['moves']}",
         f"- Average centipawn loss: {_num(overview['acpl'])}",
         f"- Inaccuracy / mistake / blunder rate per move: {_pct(overview['inaccuracy_rate'])} / "
         f"{_pct(overview['mistake_rate'])} / {_pct(overview['blunder_rate'])}",

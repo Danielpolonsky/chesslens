@@ -4,8 +4,10 @@ import requests
 from src import ingest
 from src.ingest import (
     ChessComError,
+    UploadError,
     candidate_players,
     classify_time_control,
+    decode_pgn_bytes,
     fetch_chesscom_games,
     opening_family,
     opening_from_eco_url,
@@ -81,6 +83,38 @@ def test_variant_games_are_skipped():
     pgn = '[Variant "Chess960"]\n[FEN "bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1"]\n[SetUp "1"]\n\n1. e4 *'
     report = parse_pgn_text(pgn)
     assert report.games == [] and report.skipped == 1
+    assert report.skip_reasons["unsupported variant"] == 1
+
+
+def test_duplicate_games_inside_one_file_are_kept_once():
+    report = parse_pgn_text(SCHOLARS_MATE + "\n\n" + SCHOLARS_MATE)
+    assert len(report.games) == 1
+    assert report.games_read == 2
+    assert report.duplicates_in_file == 1
+
+
+def test_unreadable_token_rejects_the_whole_game():
+    pgn = '[White "A"]\n[Black "B"]\n\n1. e4 Zz9 e5 2. Nf3 Nc6 *\n'
+    report = parse_pgn_text(pgn)
+    assert report.games == []
+    assert report.skip_reasons["unreadable move text"] == 1
+    assert "Zz9" in report.errors[0]
+
+
+def test_invalid_fen_is_rejected():
+    pgn = '[SetUp "1"]\n[FEN "8/8/8 w - - 0 1"]\n[White "A"]\n[Black "B"]\n\n1. e4 *\n'
+    report = parse_pgn_text(pgn)
+    assert report.games == []
+    assert report.skip_reasons["invalid starting position (FEN)"] == 1
+
+
+def test_decode_utf16_cp1252_and_binary():
+    text, warning = decode_pgn_bytes('[White "José"]\n\n1. e4 *\n'.encode("utf-16"))
+    assert warning is None and "José" in text
+    text, warning = decode_pgn_bytes('[White "José"]\n\n1. e4 *\n'.encode("cp1252"))
+    assert "José" in text and warning and "Windows-1252" in warning
+    with pytest.raises(UploadError, match="binary"):
+        decode_pgn_bytes(b"\x00\x01\xff not text")
 
 
 def test_max_games_truncation(sample_pgn):
@@ -225,10 +259,23 @@ def test_chesscom_timeout_is_reported():
 
 
 def test_chesscom_max_games_is_capped():
-    games = [{"pgn": SCHOLARS_MATE, "rules": "chess", "end_time": i} for i in range(150)]
+    games = []
+    for i in range(150):
+        month, day = divmod(i, 28)
+        pgn = SCHOLARS_MATE.replace('[Date "2024.03.05"]', f'[Date "2024.{month + 1:02d}.{day + 1:02d}"]')
+        games.append({"pgn": pgn, "rules": "chess", "end_time": i})
     session = FakeSession({ARCHIVES: FakeResponse(200, {"archives": [M1]}), M1: _month(games)})
     report = fetch_chesscom_games("alice", max_games=10_000, session=session, sleep=lambda s: None)
     assert len(report.games) == ingest.config.CHESSCOM_MAX_GAMES == 100
+    assert report.duplicates_in_file == 0
+
+
+def test_chesscom_collapses_duplicate_games_in_one_download():
+    games = [{"pgn": SCHOLARS_MATE, "rules": "chess", "end_time": i} for i in range(3)]
+    session = FakeSession({ARCHIVES: FakeResponse(200, {"archives": [M1]}), M1: _month(games)})
+    report = fetch_chesscom_games("alice", max_games=10, session=session, sleep=lambda s: None)
+    assert len(report.games) == 1
+    assert report.duplicates_in_file == 2
 
 
 def test_chesscom_account_without_games():

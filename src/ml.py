@@ -255,7 +255,8 @@ def train_and_evaluate(frame: pd.DataFrame, seed: int = 42, test_size: float = 0
     if external is not None and len(external) and external[TARGET_COLUMN].nunique() > 1:
         ext_proba = best.predict_proba(external[FEATURE_COLUMNS])[:, 1]
         metrics["external_evaluation"] = {
-            "description": "Demo player's games (never used in training or model selection)",
+            "description": ("Every position in the demo games, moves by the demo player and by "
+                            "their opponents (games never used in training or model selection)"),
             "n_positions": int(len(external)),
             "n_games": int(external[GROUP_COLUMN].nunique()),
             "positive_rate": float(external[TARGET_COLUMN].mean()),

@@ -1,4 +1,8 @@
-"""Plotly figure builders with a consistent, restrained visual style."""
+"""Plotly figure builders with a consistent, restrained visual style.
+
+Each chart shows one kind of measure on one axis. Titles say whether higher or lower is
+better, and sample sizes are printed where they change how a bar should be read.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ import plotly.graph_objects as go
 from .ui import CLASS_COLORS, GREEN, INK, ORANGE, OUTCOME_COLORS, RED, SLATE
 
 FONT = "Inter, system-ui, Segoe UI, sans-serif"
+NEUTRAL_BAR = "#525252"
 
 
 def style(fig: go.Figure, height: int = 340, title: str | None = None, legend: bool = True) -> go.Figure:
@@ -34,33 +39,27 @@ def style(fig: go.Figure, height: int = 340, title: str | None = None, legend: b
     return fig
 
 
-def results_donut(wins: int, draws: int, losses: int) -> go.Figure:
-    fig = go.Figure(
-        go.Pie(
-            labels=["Win", "Draw", "Loss"], values=[wins, draws, losses], hole=0.7,
-            marker=dict(colors=[OUTCOME_COLORS[k] for k in ("Win", "Draw", "Loss")],
-                        line=dict(color="#FFFFFF", width=2)),
-            sort=False, textinfo="percent", textposition="inside", insidetextorientation="horizontal",
-            hovertemplate="%{label}: %{value} games<extra></extra>",
-        )
-    )
-    total = wins + draws + losses
-    fig.add_annotation(text=f"<b>{total}</b><br>games", showarrow=False, font=dict(size=15))
-    return style(fig, height=300, title="Results")
+def _n(n) -> str:
+    return f"n={int(n):,}"
+
+
+# ---------------------------------------------------------------------------
+# Results and trends
+# ---------------------------------------------------------------------------
 
 
 def color_results(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     for col, name in (("win_rate", "Win"), ("draw_rate", "Draw"), ("loss_rate", "Loss")):
         fig.add_bar(
-            y=[f"{c.title()} ({int(n)} g)" for c, n in zip(df["color"], df["games"])],
+            y=[f"{c.title()} ({int(n)} games)" for c, n in zip(df["color"], df["games"])],
             x=df[col], name=name, orientation="h", marker_color=OUTCOME_COLORS[name],
             hovertemplate="%{y}: %{x:.0%}<extra>" + name + "</extra>",
             text=[f"{v:.0%}" if v >= 0.06 else "" for v in df[col]], textposition="inside",
         )
     fig.update_layout(barmode="stack")
     fig.update_xaxes(tickformat=".0%", range=[0, 1])
-    return style(fig, height=300, title="White vs Black")
+    return style(fig, height=250, title="Results by colour (share of games)")
 
 
 TIME_CLASS_COLORS = {"bullet": ORANGE, "blitz": GREEN, "rapid": INK,
@@ -76,28 +75,26 @@ def rating_trend(games: pd.DataFrame) -> go.Figure:
             continue
         fig.add_scatter(
             x=sub["played_at"], y=sub["player_elo"], mode="lines+markers",
-            name=f"{tc.title()} ({len(sub)} g)",
+            name=f"{tc.title()} ({len(sub)} games)",
             line=dict(color=TIME_CLASS_COLORS.get(tc, SLATE), width=1.5),
-            marker=dict(color=[OUTCOME_COLORS.get(o, SLATE) for o in sub["outcome"]], size=6,
-                        line=dict(color="white", width=1)),
+            marker=dict(color=TIME_CLASS_COLORS.get(tc, SLATE), size=5),
             customdata=np.stack([sub["opponent"], sub["opponent_elo"].fillna(0), sub["outcome"]], axis=1),
             hovertemplate="%{x|%b %d, %Y}<br>Rating %{y}<br>vs %{customdata[0]} (%{customdata[1]})"
                           " - %{customdata[2]}<extra>" + tc.title() + "</extra>",
         )
-    return style(fig, height=330, title="Rating over time by time control (marker colour = result)")
+    fig.update_yaxes(title="Rating before the game")
+    return style(fig, height=320, title="Rating over time, by time control")
 
 
-def trend_lines(df: pd.DataFrame, granularity: str) -> go.Figure:
-    fig = go.Figure()
-    fig.add_bar(x=df["period"], y=df["games"], name="Games", marker_color="#EDEDED", yaxis="y2",
-                hovertemplate="%{x}: %{y} games<extra></extra>")
-    fig.add_scatter(x=df["period"], y=df["acpl"], name="Avg centipawn loss", mode="lines+markers",
-                    line=dict(color=INK, width=2.5))
-    fig.add_scatter(x=df["period"], y=df["avg_score"] * 100, name="Score %", mode="lines+markers",
-                    line=dict(color=GREEN, width=2.5, dash="dot"))
-    fig.update_layout(yaxis2=dict(overlaying="y", side="right", showgrid=False, title="Games"),
-                      yaxis=dict(title="ACPL / Score %"))
-    return style(fig, height=340, title=f"Performance by {granularity}")
+def score_by_period(df: pd.DataFrame, granularity: str) -> go.Figure:
+    fig = go.Figure(go.Bar(
+        x=df["period"], y=df["avg_score"], marker_color=NEUTRAL_BAR,
+        text=[f"{s:.0%}<br>{int(g)} games" for s, g in zip(df["avg_score"], df["games"])],
+        textposition="outside", cliponaxis=False,
+        hovertemplate="%{x}: score %{y:.0%}<extra></extra>",
+    ))
+    fig.update_yaxes(tickformat=".0%", range=[0, 1.15], title="Score")
+    return style(fig, height=320, title=f"Score by {granularity} (higher is better)", legend=False)
 
 
 def rolling_acpl(games: pd.DataFrame, window: int = 10) -> go.Figure:
@@ -105,101 +102,88 @@ def rolling_acpl(games: pd.DataFrame, window: int = 10) -> go.Figure:
     df["game_no"] = np.arange(1, len(df) + 1)
     df["rolling"] = df["acpl"].rolling(window, min_periods=max(3, window // 2)).mean()
     fig = go.Figure()
-    fig.add_scatter(x=df["game_no"], y=df["acpl"], mode="markers", name="Game ACPL",
-                    marker=dict(color=[OUTCOME_COLORS.get(o, SLATE) for o in df["outcome"]], size=6,
-                                opacity=0.65),
+    fig.add_scatter(x=df["game_no"], y=df["acpl"], mode="markers", name="One game",
+                    marker=dict(color="#C7C7C7", size=6),
                     customdata=np.stack([df["opponent"], df["outcome"]], axis=1),
-                    hovertemplate="Game %{x}: ACPL %{y:.0f}<br>vs %{customdata[0]} (%{customdata[1]})"
-                                  "<extra></extra>")
+                    hovertemplate="Game %{x}: %{y:.0f} cp per move<br>vs %{customdata[0]} "
+                                  "(%{customdata[1]})<extra></extra>")
     fig.add_scatter(x=df["game_no"], y=df["rolling"], mode="lines", name=f"{window}-game average",
-                    line=dict(color=INK, width=3))
-    fig.update_xaxes(title="Game # (chronological)")
-    fig.update_yaxes(title="Average centipawn loss")
-    return style(fig, height=340, title="Accuracy trend (lower is better)")
+                    line=dict(color=INK, width=2))
+    fig.update_xaxes(title="Game number (oldest first)")
+    fig.update_yaxes(title="Average centipawn loss per move", rangemode="tozero")
+    return style(fig, height=320, title="Centipawn loss over time (lower is better)")
+
+
+# ---------------------------------------------------------------------------
+# Error patterns (all: share of the selected player's moves; lower is better)
+# ---------------------------------------------------------------------------
 
 
 def phase_error_rates(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
-    labels = [f"{p.title()}<br><span style='font-size:11px'>n={int(n):,} moves</span>"
+    labels = [f"{p.title()}<br><span style='font-size:11px'>{_n(n)} moves</span>"
               for p, n in zip(df["phase"], df["moves"])]
     for col, name in (("inaccuracy_rate", "inaccuracy"), ("mistake_rate", "mistake"),
                       ("blunder_rate", "blunder")):
         fig.add_bar(x=labels, y=df[col], name=name.title(), marker_color=CLASS_COLORS[name],
-                    text=[f"{v:.1%}" for v in df[col]], textposition="outside",
+                    text=[f"{v:.1%}" for v in df[col]], textposition="outside", cliponaxis=False,
                     hovertemplate="%{y:.1%} of moves<extra>" + name.title() + "</extra>")
     fig.update_layout(barmode="group")
-    fig.update_yaxes(tickformat=".0%", title="Share of evaluated moves")
-    return style(fig, height=360, title="Error rate per evaluated move, by game phase")
-
-
-def cpl_histogram(moves: pd.DataFrame, cap: int = 600) -> go.Figure:
-    df = moves.copy()
-    df["cpl_capped"] = df["cpl"].clip(upper=cap)
-    fig = go.Figure()
-    for cls in ("good", "inaccuracy", "mistake", "blunder"):
-        sub = df[df["classification"] == cls]
-        fig.add_histogram(x=sub["cpl_capped"], name=cls.title(), marker_color=CLASS_COLORS[cls],
-                          xbins=dict(start=0, end=cap + 20, size=20))
-    fig.update_layout(barmode="stack")
-    fig.update_xaxes(title=f"Centipawn loss per move (values above {cap} shown at {cap})")
-    fig.update_yaxes(title="Moves", type="log")
-    return style(fig, height=340, title="Distribution of centipawn loss")
+    fig.update_yaxes(tickformat=".0%", title="Share of your moves")
+    return style(fig, height=340, title="Errors by game phase (lower is better)")
 
 
 def move_number_profile(df: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
-    fig.add_bar(x=df["label"], y=df["moves"], name="Moves analyzed", marker_color="#EDEDED", yaxis="y2")
-    fig.add_scatter(x=df["label"], y=df["serious_rate"], name="Mistake + blunder rate",
-                    mode="lines+markers", line=dict(color=RED, width=2.5))
-    fig.update_layout(yaxis=dict(tickformat=".0%", title="Serious-error rate"),
-                      yaxis2=dict(overlaying="y", side="right", showgrid=False, title="Moves"))
+    fig = go.Figure(go.Bar(
+        x=df["label"], y=df["serious_rate"], marker_color=RED,
+        text=[f"{v:.0%}<br>{_n(n)}" for v, n in zip(df["serious_rate"], df["moves"])],
+        textposition="outside", cliponaxis=False,
+        hovertemplate="Moves %{x}: %{y:.1%} mistakes or blunders<extra></extra>",
+    ))
+    top = float(df["serious_rate"].max()) if len(df) else 0.3
+    fig.update_yaxes(tickformat=".0%", title="Mistake + blunder rate", range=[0, top * 1.35 + 0.01])
     fig.update_xaxes(title="Move number")
-    return style(fig, height=320, title="When do mistakes happen?")
-
-
-def time_class_bars(df: pd.DataFrame) -> go.Figure:
-    labels = [f"{t.title()} ({int(g)} g)" for t, g in zip(df["time_class"], df["games"])]
-    fig = go.Figure()
-    fig.add_bar(x=labels, y=df["avg_score"], name="Score", marker_color=GREEN,
-                text=[f"{v:.0%}" for v in df["avg_score"]], textposition="outside")
-    fig.add_bar(x=labels, y=df["serious_rate"], name="Mistake + blunder rate", marker_color=RED,
-                text=[f"{v:.0%}" if pd.notna(v) else "" for v in df["serious_rate"]], textposition="outside")
-    fig.update_layout(barmode="group")
-    fig.update_yaxes(tickformat=".0%")
-    return style(fig, height=320, title="Performance by time control")
+    return style(fig, height=320, title="Mistakes and blunders by move number (lower is better)",
+                 legend=False)
 
 
 def context_bars(df: pd.DataFrame) -> go.Figure:
     order = {"losing": 0, "balanced": 1, "winning": 2}
     df = df.sort_values("context", key=lambda s: s.map(order))
-    labels = {"losing": "Clearly worse (<= -2)", "balanced": "Roughly equal", "winning": "Clearly better (>= +2)"}
-    fig = go.Figure(
-        go.Bar(
-            x=[f"{labels[c]}<br><span style='font-size:11px'>n={int(n):,}</span>"
-               for c, n in zip(df["context"], df["moves"])],
-            y=df["serious_rate"], marker_color=[RED, SLATE, GREEN][: len(df)],
-            text=[f"{v:.1%}" for v in df["serious_rate"]], textposition="outside",
-        )
-    )
-    fig.update_yaxes(tickformat=".0%", title="Mistake + blunder rate")
-    return style(fig, height=320, title="Error rate by position evaluation before the move", legend=False)
+    labels = {"losing": "You were worse (eval -2 or less)", "balanced": "Roughly equal",
+              "winning": "You were better (eval +2 or more)"}
+    fig = go.Figure(go.Bar(
+        x=[f"{labels[c]}<br><span style='font-size:11px'>{_n(n)} moves</span>"
+           for c, n in zip(df["context"], df["moves"])],
+        y=df["serious_rate"], marker_color=RED,
+        text=[f"{v:.1%}" for v in df["serious_rate"]], textposition="outside", cliponaxis=False,
+    ))
+    top = float(df["serious_rate"].max()) if len(df) else 0.3
+    fig.update_yaxes(tickformat=".0%", title="Mistake + blunder rate", range=[0, top * 1.3 + 0.01])
+    return style(fig, height=320, title="Mistakes and blunders by position before the move "
+                                        "(lower is better)", legend=False)
 
 
-def opening_bars(df: pd.DataFrame, top: int = 12) -> go.Figure:
-    d = df.sort_values("games", ascending=False).head(top).iloc[::-1]
-    fig = go.Figure(
-        go.Bar(
-            y=d["opening"], x=d["games"], orientation="h",
-            marker=dict(color=d["avg_score"], colorscale=[[0, RED], [0.5, "#EDEDED"], [1, GREEN]],
-                        cmin=0, cmax=1, colorbar=dict(title="Score", tickformat=".0%", thickness=12)),
-            customdata=np.stack([d["avg_score"], d["wins"], d["draws"], d["losses"]], axis=1),
-            hovertemplate="%{y}<br>%{x} games, score %{customdata[0]:.0%}<br>"
-                          "%{customdata[1]}W / %{customdata[2]}D / %{customdata[3]}L<extra></extra>",
-            text=[f"{s:.0%}" for s in d["avg_score"]], textposition="outside", cliponaxis=False,
-        )
-    )
-    fig.update_xaxes(title="Games played", range=[0, d["games"].max() * 1.15])
-    return style(fig, height=max(320, 30 * len(d) + 80), title="Most-played openings (colour = score)",
+# ---------------------------------------------------------------------------
+# Openings
+# ---------------------------------------------------------------------------
+
+
+def opening_score_bars(df: pd.DataFrame, overall_score: float) -> go.Figure:
+    d = df.sort_values("games", ascending=True)
+    fig = go.Figure(go.Bar(
+        y=d["opening"], x=d["avg_score"], orientation="h", marker_color=NEUTRAL_BAR,
+        text=[f"{s:.0%} · {int(g)} games" for s, g in zip(d["avg_score"], d["games"])],
+        textposition="outside", cliponaxis=False,
+        customdata=np.stack([d["wins"], d["draws"], d["losses"]], axis=1),
+        hovertemplate="%{y}<br>Score %{x:.0%} (%{customdata[0]}W / %{customdata[1]}D / "
+                      "%{customdata[2]}L)<extra></extra>",
+    ))
+    if pd.notna(overall_score):
+        fig.add_vline(x=overall_score, line_dash="dash", line_color=SLATE,
+                      annotation_text=f"All games {overall_score:.0%}", annotation_position="top")
+    fig.update_xaxes(tickformat=".0%", range=[0, 1.3], title="Score (draw = half a point)")
+    return style(fig, height=max(260, 34 * len(d) + 110), title="Score by opening (higher is better)",
                  legend=False)
 
 
@@ -211,13 +195,12 @@ def opening_scatter(df: pd.DataFrame, min_games: int) -> go.Figure:
             x=d["acpl"], y=d["avg_score"], mode="markers+text",
             text=[o if o in labelled else "" for o in d["opening"]], hovertext=d["opening"],
             textposition="top center", textfont=dict(size=10.5),
-            marker=dict(size=np.sqrt(d["games"]) * 7, color=d["serious_rate"],
-                        colorscale=[[0, GREEN], [1, RED]], showscale=True,
-                        colorbar=dict(title="Err. rate", tickformat=".0%", thickness=12),
+            marker=dict(size=np.sqrt(d["games"]) * 7, color=NEUTRAL_BAR, opacity=0.55,
                         line=dict(color="white", width=1)),
             customdata=np.stack([d["games"], d["serious_rate"]], axis=1),
-            hovertemplate="%{hovertext}<br>%{customdata[0]} games<br>Score %{y:.0%}<br>ACPL %{x:.0f}"
-                          "<br>Mistake+blunder rate %{customdata[1]:.1%}<extra></extra>",
+            hovertemplate="%{hovertext}<br>%{customdata[0]} games<br>Score %{y:.0%}<br>"
+                          "Centipawn loss %{x:.0f}<br>Mistake+blunder rate %{customdata[1]:.1%}"
+                          "<extra></extra>",
         )
     )
     if not d.empty:
@@ -225,8 +208,13 @@ def opening_scatter(df: pd.DataFrame, min_games: int) -> go.Figure:
         fig.update_xaxes(range=[d["acpl"].min() - 0.25 * span, d["acpl"].max() + 0.25 * span])
     fig.update_xaxes(title="Average centipawn loss (lower is better)")
     fig.update_yaxes(title="Score", tickformat=".0%", range=[-0.08, 1.08])
-    return style(fig, height=420, title=f"Score vs accuracy by opening (>= {min_games} games; size = games)",
-                 legend=False)
+    return style(fig, height=400, title=f"Score vs centipawn loss (openings with ≥ {min_games} games; "
+                                        "size = games)", legend=False)
+
+
+# ---------------------------------------------------------------------------
+# Single game
+# ---------------------------------------------------------------------------
 
 
 def game_eval_curve(moves: pd.DataFrame, highlight_ply: int, player_color: str) -> go.Figure:
@@ -235,71 +223,77 @@ def game_eval_curve(moves: pd.DataFrame, highlight_ply: int, player_color: str) 
     player_pov = moves["eval_after"] * sign
     fig = go.Figure()
     fig.add_scatter(x=moves["ply"], y=(player_pov / 100).clip(-10, 10), mode="lines",
-                    line=dict(color=INK, width=2), fill="tozeroy", fillcolor="rgba(47,158,107,0.08)",
-                    name="Evaluation", hovertemplate="Ply %{x}: %{y:+.2f}<extra></extra>")
+                    line=dict(color=INK, width=2), fill="tozeroy", fillcolor="rgba(23,23,23,0.05)",
+                    name="Evaluation", hovertemplate="Half-move %{x}: %{y:+.2f}<extra></extra>")
     hl = moves[moves["ply"] == highlight_ply]
     if not hl.empty:
         y = float((hl["eval_after"].iloc[0] * (1 if hl["color"].iloc[0] == player_color else -1)) / 100)
         fig.add_scatter(x=[highlight_ply], y=[max(-10, min(10, y))], mode="markers", name="This move",
-                        marker=dict(color=RED, size=12, symbol="x"))
-    fig.update_yaxes(title="Eval (pawns, your view)", range=[-10.5, 10.5])
-    fig.update_xaxes(title="Ply")
+                        marker=dict(color=RED, size=11, symbol="x"))
+    fig.update_yaxes(title="Evaluation for you (pawns)", range=[-10.5, 10.5])
+    fig.update_xaxes(title="Half-move number")
     return style(fig, height=260, legend=False)
 
 
+# ---------------------------------------------------------------------------
+# Machine learning (scores are model risk scores, not calibrated probabilities)
+# ---------------------------------------------------------------------------
+
+
 def model_comparison(models: dict) -> go.Figure:
-    metrics = [("average_precision", "Avg precision"), ("roc_auc", "ROC AUC"), ("precision", "Precision"),
-               ("recall", "Recall"), ("f1", "F1")]
-    palette = {"Dummy (stratified)": "#D4D4D4", "Logistic regression": INK, "Random forest": GREEN}
+    metrics = [("average_precision", "Average precision"), ("roc_auc", "ROC AUC")]
+    palette = {"Dummy (stratified)": "#D4D4D4", "Logistic regression": SLATE, "Random forest": INK}
     fig = go.Figure()
     for name, res in models.items():
         t = res["test"]
         fig.add_bar(x=[m[1] for m in metrics], y=[t[m[0]] for m in metrics], name=name,
                     marker_color=palette.get(name, SLATE),
+                    text=[f"{t[m[0]]:.3f}" for m in metrics], textposition="outside", cliponaxis=False,
                     hovertemplate="%{x}: %{y:.3f}<extra>" + name + "</extra>")
     fig.update_layout(barmode="group")
-    fig.update_yaxes(range=[0, 1.05])
-    return style(fig, height=360, title="Held-out test performance (unseen games)")
+    fig.update_yaxes(range=[0, 1.05], title="Higher is better")
+    return style(fig, height=340, title="Ranking quality on the held-out test games")
 
 
 def pr_curves(curves: dict, base_rate: float) -> go.Figure:
     fig = go.Figure()
-    colors = {"Logistic regression": INK, "Random forest": GREEN}
+    colors = {"Logistic regression": SLATE, "Random forest": INK}
     for name, c in curves.items():
         fig.add_scatter(x=c["recall"], y=c["precision"], mode="lines", name=name,
-                        line=dict(color=colors.get(name, SLATE), width=2.5))
+                        line=dict(color=colors.get(name, SLATE), width=2))
     fig.add_hline(y=base_rate, line_dash="dash", line_color=SLATE,
                   annotation_text=f"Base rate {base_rate:.1%}", annotation_position="top right")
-    fig.update_xaxes(title="Recall", range=[0, 1])
-    fig.update_yaxes(title="Precision", range=[0, 1])
-    return style(fig, height=360, title="Precision-recall curves (test set)")
+    fig.update_xaxes(title="Recall (share of real errors flagged)", range=[0, 1])
+    fig.update_yaxes(title="Precision (share of flags that were errors)", range=[0, 1])
+    return style(fig, height=340, title="Precision-recall curves (held-out test games)")
 
 
 def calibration_bars(rows: list[dict]) -> go.Figure:
     df = pd.DataFrame(rows)
     fig = go.Figure()
-    fig.add_bar(x=df["decile"], y=df["observed_rate"], name="Observed error rate", marker_color=GREEN)
-    fig.add_scatter(x=df["decile"], y=df["mean_predicted"], name="Mean predicted risk",
+    fig.add_bar(x=df["decile"], y=df["observed_rate"], name="Observed error rate", marker_color=RED)
+    fig.add_scatter(x=df["decile"], y=df["mean_predicted"], name="Mean model score",
                     mode="lines+markers", line=dict(color=INK))
-    fig.update_xaxes(title="Predicted-risk decile (1 = lowest)", dtick=1)
+    fig.update_xaxes(title="Model-score decile (1 = lowest risk)", dtick=1)
     fig.update_yaxes(tickformat=".0%")
-    return style(fig, height=340, title="Observed serious-error rate by predicted-risk decile")
+    return style(fig, height=340, title="Observed error rate vs model score (held-out test games)")
 
 
 def importance_bars(rows: list[dict], value_key: str, title: str, top: int = 12) -> go.Figure:
     df = pd.DataFrame(rows).head(top).iloc[::-1]
-    colors = [GREEN if v >= 0 else RED for v in df[value_key]]
+    colors = [INK if v >= 0 else SLATE for v in df[value_key]]
     fig = go.Figure(go.Bar(y=df["feature"], x=df[value_key], orientation="h", marker_color=colors,
                            error_x=dict(type="data", array=df["std"]) if "std" in df else None))
     return style(fig, height=max(300, 26 * len(df) + 70), title=title, legend=False)
 
 
-def risk_bucket_bars(df: pd.DataFrame) -> go.Figure:
+def risk_bucket_bars(df: pd.DataFrame, title: str) -> go.Figure:
     fig = go.Figure()
-    fig.add_bar(x=df["bucket"], y=df["observed_rate"], name="Observed rate", marker_color=GREEN,
-                text=[f"{v:.0%}<br>n={n}" for v, n in zip(df["observed_rate"], df["positions"])],
-                textposition="outside")
-    fig.add_scatter(x=df["bucket"], y=df["mean_predicted"], name="Mean predicted risk",
+    fig.add_bar(x=df["bucket"], y=df["observed_rate"], name="Observed error rate", marker_color=RED,
+                text=[f"{v:.0%}<br>{_n(n)}" for v, n in zip(df["observed_rate"], df["positions"])],
+                textposition="outside", cliponaxis=False)
+    fig.add_scatter(x=df["bucket"], y=df["mean_predicted"], name="Mean model score",
                     mode="lines+markers", line=dict(color=INK))
     fig.update_yaxes(tickformat=".0%")
-    return style(fig, height=340, title="Your positions: predicted risk vs actual serious-error rate")
+    fig.update_xaxes(title="Model-score group (each holds one fifth of the moves)")
+    return style(fig, height=340, title=title)

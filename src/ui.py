@@ -76,13 +76,33 @@ hr { margin: 1rem 0 !important; }
 .cl-meta b { color: #171717; font-weight: 500; }
 .cl-label { color: #737373; font-size: .86rem; margin: 1rem 0 .15rem 0; }
 .cl-value { color: #171717; font-size: .92rem; font-weight: 500; }
-.cl-steps { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #EBEBEB;
-  border-radius: 12px; overflow: hidden; margin: .4rem 0 0 0; }
-.cl-step { padding: .85rem 1rem; border-right: 1px solid #EBEBEB; }
-.cl-step:last-child { border-right: none; }
-.cl-step .n { color: #A3A3A3; font-size: .78rem; font-weight: 500; }
-.cl-step .t { color: #171717; font-size: .92rem; font-weight: 600; margin: .15rem 0 .2rem 0; }
-.cl-step .d { color: #737373; font-size: .84rem; line-height: 1.45; }
+.cl-card-title { font-weight: 600; font-size: 1rem; color: #171717; margin-bottom: .2rem; }
+
+/* Workflow strip */
+.cl-flow { display: flex; flex-wrap: wrap; gap: .45rem .55rem; align-items: center; margin: 0 0 1.5rem 0; }
+.cl-flow-step { display: inline-flex; align-items: center; gap: .4rem; font-size: .86rem; color: #737373; }
+.cl-flow-step:not(:last-child)::after { content: "→"; color: #C7C7C7; margin-left: .55rem; }
+.cl-flow-step .n { width: 20px; height: 20px; border-radius: 50%; border: 1px solid #D4D4D4;
+  display: inline-flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 600;
+  color: #525252; background: #FFFFFF; }
+.cl-flow-step.current { color: #171717; font-weight: 600; }
+.cl-flow-step.current .n { background: #171717; border-color: #171717; color: #FFFFFF; }
+.cl-flow-step.done .n { background: #ECFDF3; border-color: #ABEFC6; color: #067647; }
+
+/* Context chips (active dataset, player, filters) */
+.cl-context { display: flex; flex-wrap: wrap; gap: .4rem; margin: -.7rem 0 1.3rem 0; }
+.cl-chip { font-size: .8rem; color: #171717; background: #FAFAFA; border: 1px solid #EBEBEB;
+  border-radius: 6px; padding: .1rem .5rem; }
+.cl-chip .k { color: #737373; }
+.cl-note { color: #737373; font-size: .86rem; line-height: 1.5; margin: .2rem 0 .8rem 0; }
+
+/* Board legend and move summary */
+.cl-legend { display: flex; flex-wrap: wrap; gap: .35rem 1.2rem; font-size: .82rem; color: #525252;
+  margin: .55rem 0 0 0; }
+.cl-legend span { display: inline-flex; align-items: center; gap: .45rem; }
+.cl-move-title { font-size: 1.35rem; font-weight: 600; color: #171717; letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.cl-move-sub { color: #737373; font-size: .88rem; margin: .2rem 0 .9rem 0; }
 
 /* Recommendations */
 .cl-rec-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .45rem; }
@@ -121,6 +141,14 @@ section[data-testid="stSidebar"] .cl-side-brand { display: flex; align-items: ce
   display: inline-flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1; }
 section[data-testid="stSidebar"] h5 { font-size: .8rem !important; font-weight: 500 !important;
   color: #737373 !important; margin: .8rem 0 0 0; }
+
+@media (max-width: 720px) {
+  .block-container { padding: 2.6rem 1rem 3rem 1rem; }
+  .cl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .cl-page-title, .cl-greeting { font-size: 1.35rem; }
+  .cl-kv { grid-template-columns: 112px 1fr; }
+  .cl-card .value { font-size: 1.3rem; }
+}
 </style>
 """
 
@@ -183,21 +211,29 @@ def confidence_badge(label: str) -> str:
     return badge(label, tone)
 
 
+PLAYED_ARROW = "#D93F3Fdd"
+BEST_ARROW = "#1F8A5Bdd"
+
+
 def board_svg(fen: str, played_uci: str | None, best_uci: str | None, orientation: str = "white",
               size: int = 440, coordinates: bool = True) -> str:
+    """Board before the move. Played move: solid red arrow plus shaded squares.
+    Engine move: dashed green arrow - distinguishable without relying on colour."""
     board = chess.Board(fen)
-    arrows = []
+    arrows, fill = [], {}
     if best_uci and best_uci != played_uci:
         mv = chess.Move.from_uci(best_uci)
-        arrows.append(chess.svg.Arrow(mv.from_square, mv.to_square, color="#2F9E6Bcc"))
+        arrows.append(chess.svg.Arrow(mv.from_square, mv.to_square, color=BEST_ARROW))
     if played_uci:
         mv = chess.Move.from_uci(played_uci)
-        arrows.append(chess.svg.Arrow(mv.from_square, mv.to_square, color="#E5484Dcc"))
+        arrows.append(chess.svg.Arrow(mv.from_square, mv.to_square, color=PLAYED_ARROW))
+        fill = {mv.from_square: "#E5605F40", mv.to_square: "#E5605F40"}
     check = board.king(board.turn) if board.is_check() else None
-    return chess.svg.board(
+    svg = chess.svg.board(
         board,
         orientation=chess.WHITE if orientation == "white" else chess.BLACK,
         arrows=arrows,
+        fill=fill,
         check=check,
         size=size,
         coordinates=coordinates,
@@ -205,13 +241,56 @@ def board_svg(fen: str, played_uci: str | None, best_uci: str | None, orientatio
             "square light": "#F0F0EE",
             "square dark": "#B9BCB8",
             "margin": "#FFFFFF",
-            "coord": "#A3A3A3",
+            "coord": "#737373",
         },
+    )
+    return svg.replace(f'stroke="{BEST_ARROW}"', f'stroke="{BEST_ARROW}" stroke-dasharray="11 7"')
+
+
+def render_board(svg: str, label: str = "") -> None:
+    aria = f' role="img" aria-label="{esc(label)}"' if label else ""
+    st.markdown(f'<div class="cl-board"{aria}>{svg}</div>', unsafe_allow_html=True)
+
+
+def board_legend() -> str:
+    return (
+        '<div class="cl-legend">'
+        '<span><svg width="34" height="10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" '
+        f'stroke="{PLAYED_ARROW[:7]}" stroke-width="4"/></svg>Solid red arrow, shaded squares: move played</span>'
+        '<span><svg width="34" height="10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" '
+        f'stroke="{BEST_ARROW[:7]}" stroke-width="4" stroke-dasharray="7 4"/></svg>'
+        "Dashed green arrow: engine's preferred move</span></div>"
     )
 
 
-def render_board(svg: str) -> None:
-    st.markdown(f'<div class="cl-board">{svg}</div>', unsafe_allow_html=True)
+def context_line(items: Iterable[tuple[str, str]]) -> None:
+    """Small 'label: value' chips describing the active dataset, player and filters."""
+    chips = "".join(f'<span class="cl-chip"><span class="k">{esc(k)}</span> {esc(v)}</span>'
+                    for k, v in items)
+    st.markdown(f'<div class="cl-context">{chips}</div>', unsafe_allow_html=True)
+
+
+def kv_list(rows: Iterable[tuple[str, str]]) -> None:
+    st.markdown(
+        '<div class="cl-kv">' + "".join(
+            f'<div class="k">{esc(k)}</div><div class="v">{esc(v)}</div>' for k, v in rows)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def workflow(steps: list[str], current: int | None = None, done: int = 0) -> None:
+    """Numbered workflow strip. Steps before ``done`` are marked complete."""
+    parts = []
+    for i, label in enumerate(steps):
+        state = "done" if i < done else ("current" if i == current else "")
+        mark = "✓" if state == "done" else str(i + 1)
+        parts.append(f'<div class="cl-flow-step {state}"><span class="n">{mark}</span>{esc(label)}</div>')
+    st.markdown(f'<div class="cl-flow">{"".join(parts)}</div>', unsafe_allow_html=True)
+
+
+def note(text: str) -> None:
+    st.markdown(f'<div class="cl-note">{esc(text)}</div>', unsafe_allow_html=True)
 
 
 def fmt_pct(x, digits: int = 1) -> str:

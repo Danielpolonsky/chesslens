@@ -58,6 +58,8 @@ def test_coaching_summary_and_csv(analyzed_db):
     )
     assert md.startswith("# ChessLens coaching summary - Alice")
     assert "Polonsky Academy" in md and "project-defined" in md
+    assert "Analyzed moves by this player: 11" in md
+    assert "1W / 1D / 1L" in md
     assert "| Opening |" in md
     csv = reporting.to_csv_bytes(an.move_rows(conn, "Alice")).decode()
     assert csv.splitlines()[0].startswith("game_id,")

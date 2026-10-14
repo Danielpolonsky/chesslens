@@ -185,16 +185,18 @@ class EngineUnavailable(RuntimeError):
 class StockfishAnalyzer:
     """Thin wrapper around ``chess.engine.SimpleEngine`` with an evaluation cache.
 
-    ``cache_get(key, depth)`` / ``cache_put(key, depth, PositionEval)`` let callers plug in
-    a persistent (SQLite) cache; an in-memory dict is always used as a first level.
+    ``cache_get(key, depth, engine_id)`` / ``cache_put(key, depth, engine_id, PositionEval)``
+    let callers plug in a persistent (SQLite) cache; an in-memory dict is always used as a
+    first level. ``engine_id`` is only known once the engine has started, so the
+    persistent cache is consulted only after ``open()``.
     """
 
     def __init__(
         self,
         depth: int = config.DEFAULT_DEPTH,
         path: str | None = None,
-        cache_get: Callable[[str, int], PositionEval | None] | None = None,
-        cache_put: Callable[[str, int, PositionEval], None] | None = None,
+        cache_get: Callable[[str, int, str], PositionEval | None] | None = None,
+        cache_put: Callable[[str, int, str, PositionEval], None] | None = None,
     ):
         self.depth = max(config.MIN_DEPTH, min(int(depth), config.MAX_DEPTH))
         self.path = path or find_stockfish()
@@ -207,6 +209,7 @@ class StockfishAnalyzer:
         self._memory: dict[tuple[str, int], PositionEval] = {}
         self.engine: chess.engine.SimpleEngine | None = None
         self.engine_name = "Stockfish"
+        self.engine_id: str | None = None
         self.cache_hits = 0
         self.engine_calls = 0
 
@@ -224,8 +227,11 @@ class StockfishAnalyzer:
             except (OSError, chess.engine.EngineError) as exc:
                 raise EngineUnavailable(f"Could not start Stockfish at {self.path}: {exc}") from exc
             options = {"Threads": config.ENGINE_THREADS, "Hash": config.ENGINE_HASH_MB}
-            self.engine.configure({k: v for k, v in options.items() if k in self.engine.options})
+            applied = {k: v for k, v in options.items() if k in self.engine.options}
+            self.engine.configure(applied)
             self.engine_name = self.engine.id.get("name", "Stockfish")
+            self.engine_id = self.engine_name + "".join(
+                f"|{k.lower()}={v}" for k, v in sorted(applied.items()))
 
     def close(self) -> None:
         if self.engine is not None:
@@ -244,14 +250,14 @@ class StockfishAnalyzer:
         if mem_key in self._memory:
             self.cache_hits += 1
             return self._memory[mem_key]
+        if self.engine is None:
+            self.open()
         if self._cache_get is not None:
-            cached = self._cache_get(key, self.depth)
+            cached = self._cache_get(key, self.depth, self.engine_id)
             if cached is not None:
                 self.cache_hits += 1
                 self._memory[mem_key] = cached
                 return cached
-        if self.engine is None:
-            self.open()
         info = self.engine.analyse(board, chess.engine.Limit(depth=self.depth))
         self.engine_calls += 1
         pov = info["score"].white()
@@ -263,7 +269,7 @@ class StockfishAnalyzer:
         )
         self._memory[mem_key] = result
         if self._cache_put is not None:
-            self._cache_put(key, self.depth, result)
+            self._cache_put(key, self.depth, self.engine_id, result)
         return result
 
     def analyze_moves(

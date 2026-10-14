@@ -25,20 +25,20 @@ python-chess · Stockfish · Plotly · scikit-learn · pytest · Playwright · G
 - Trained a serious-mistake risk model on 56,484 positions from 800 games. Used pre-move features
   only, with an explicit leakage check, a game-grouped train/test split and grouped CV. The random
   forest reached an average precision of 0.30 against a baseline of 0.19 (ROC AUC 0.69, top-decile
-  lift 1.9×), and the limitations are documented honestly. The project is backed by 87 automated
-  tests.
+  lift 1.9×), and the limitations are documented honestly. Average precision is ranking quality,
+  not accuracy. The project is backed by the pytest suite in `tests/`.
 
 **Shorter variant (one line):**
 Built ChessLens, a Streamlit + SQLite + Stockfish chess analytics app with SQL-driven performance
 insights, statistically ranked coaching recommendations and a game-grouped ML risk model
-(AP 0.30 vs 0.19 baseline); 87 pytest tests.
+(AP 0.30 vs 0.19 baseline, which is ranking quality, not accuracy).
 
 ## Real project statistics
 
 | Metric | Value |
 | --- | --- |
 | Application code (non-blank lines, `app.py` + `src/`) | ~3,500 |
-| Automated tests (pytest) | 87, all passing locally; plus a Playwright browser smoke test |
+| Automated tests (pytest) | 108, passing locally; plus a Playwright browser smoke test |
 | Demo dataset | 158 public Lichess games (Jan 2013, CC0), 9,513 plies analysed at depth 10 |
 | Demo player summary | 65 W / 6 D / 87 L, average CPL 60, blunder rate 8.1% |
 | ML corpus | 800 games, 56,484 positions, 18.7% serious-error base rate (test set) |
@@ -46,7 +46,7 @@ insights, statistically ranked coaching recommendations and a game-grouped ML ri
 | Random forest, test set | AP 0.301, ROC AUC 0.686, precision 0.271, recall 0.708, F1 0.392 |
 | Logistic regression, test set | AP 0.279, ROC AUC 0.656 |
 | Dummy baseline, test set | AP 0.185, ROC AUC 0.495 |
-| External check (demo player, unseen) | AP 0.285, ROC AUC 0.676, top-decile lift 1.88× |
+| External check (all 9,513 demo positions, both players, unseen games) | AP 0.285, ROC AUC 0.676, top-decile lift 1.88× |
 | In-app analysis speed | 12-game PGN analysed in ~8 s at depth 10 (laptop, 1 engine thread) |
 
 ## GitHub repository description
@@ -68,8 +68,8 @@ Suggested topics: `chess`, `stockfish`, `streamlit`, `sqlite`, `data-analytics`,
 > z statistic and links each one to real positions from your games, shown on a board with the
 > engine's better move. I also trained a model that predicts mistake risk from the position before
 > a move. I split by game to avoid leakage, and it roughly doubles the hit rate in the riskiest
-> positions. It's modest, and I document that honestly. The app has 87 automated tests and keeps
-> each user's uploads private to their session."
+> positions. It's modest, and I document that honestly. Average precision is not accuracy, and the
+> demo check covers both players' moves. Each visitor's uploads stay in their own session."
 
 ## Interview questions and answers
 
